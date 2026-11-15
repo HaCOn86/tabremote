@@ -1,0 +1,6 @@
+{
+  "name": "TabRemote",
+  "description": "Transform your phone into a Bluetooth HID touchpad, air mouse, and wireless keyboard to control your tablet.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

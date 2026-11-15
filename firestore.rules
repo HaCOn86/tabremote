@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidDevice(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 60 &&
+             data.role is string && (data.role == 'CONTROLLER' || data.role == 'RECEIVER') &&
+             data.localIp is string && data.localIp.size() <= 64 &&
+             data.port is int && data.port >= 0 && data.port <= 65535 &&
+             data.sessionToken is string && data.sessionToken.size() >= 6 && data.sessionToken.size() <= 128 &&
+             data.isOnline is bool &&
+             data.accessibilityReady is bool;
+    }
+
+    match /users/{userId}/devices/{deviceId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(deviceId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(deviceId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'deviceName', 'role', 'localIp', 'port',
+                         'sessionToken', 'isOnline', 'accessibilityReady', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'deviceName', 'role', 'localIp', 'port',
+                         'sessionToken', 'isOnline', 'accessibilityReady', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp &&
+                       incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp &&
+                       incoming().updatedAt <= request.time &&
+                       isValidDevice(incoming());
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(deviceId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp &&
+                       incoming().updatedAt <= request.time &&
+                       isValidDevice(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'deviceName', 'role', 'localIp', 'port', 'sessionToken',
+                         'isOnline', 'accessibilityReady', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(deviceId);
+    }
+  }
+}

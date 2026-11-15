@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "PairedDevice": {
+      "title": "PairedDevice",
+      "description": "A controller phone or receiver tablet registered under a user's Google account for automatic Wi-Fi discovery and accessibility-backed control.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID."
+        },
+        "deviceName": {
+          "type": "string",
+          "description": "Human-readable device label."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["CONTROLLER", "RECEIVER"],
+          "description": "Whether the device acts as a remote controller or tablet receiver."
+        },
+        "localIp": {
+          "type": "string",
+          "description": "Current local Wi-Fi IPv4 address for direct low-latency socket connection."
+        },
+        "port": {
+          "type": "integer",
+          "description": "TCP socket listening port on receiver devices."
+        },
+        "sessionToken": {
+          "type": "string",
+          "description": "Per-device token used to authenticate local Wi-Fi control sessions."
+        },
+        "isOnline": {
+          "type": "boolean",
+          "description": "True when the receiver/controller is actively reachable."
+        },
+        "accessibilityReady": {
+          "type": "boolean",
+          "description": "True when the tablet Accessibility Service & cursor overlay are enabled."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "deviceName",
+        "role",
+        "localIp",
+        "port",
+        "sessionToken",
+        "isOnline",
+        "accessibilityReady",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/devices/{deviceId}": {
+      "schema": { "$ref": "#/entities/PairedDevice" },
+      "description": "Devices belonging to the signed-in Google user for seamless phone-to-tablet discovery."
+    }
+  }
+}

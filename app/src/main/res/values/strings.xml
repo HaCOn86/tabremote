@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">TabRemote</string>
+    <string name="tab_control">Kontrol</string>
+    <string name="tab_touchpad">Touchpad</string>
+    <string name="tab_air_mouse">Air Mouse</string>
+    <string name="tab_keyboard">Girişler</string>
+    <string name="tab_settings">Ayarlar</string>
+    <string name="bt_connected">Bağlı</string>
+    <string name="bt_disconnected">Bağlı Değil</string>
+    <string name="bt_not_supported">Bu cihazda Bluetooth HID desteklenmiyor</string>
+    <string name="accessibility_service_label">TabRemote Alıcı İmleç Servisi</string>
+    <string name="accessibility_service_desc">Telefonunuzdan Wi-Fi üzerinden gelen dokunma, kaydırma, özel fare imleci, geri/ana ekran ve Türkçe metin komutlarını tablet ekranında uygular.</string>
+</resources>
