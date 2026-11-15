@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -11,15 +10,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -45,25 +42,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.example.bluetooth.TouchContact
-import com.example.model.ButtonPosition
 import com.example.model.MouseButton
 import com.example.model.NavDockItemId
 import com.example.model.RemoteSettings
 import com.example.model.ScrollSide
 import com.example.sensor.AirMouseTelemetry
+import com.example.ui.components.UnifiedHorizontalPanRail
+import com.example.ui.components.UnifiedVerticalScrollRail
+import com.example.ui.theme.RubyAccent
 import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
 import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
 
 @Composable
 fun UnifiedControlScreen(
@@ -77,6 +75,9 @@ fun UnifiedControlScreen(
     onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
     onScrollGutterDrag: (deltaY: Float) -> Unit,
+    onTwoFingerVerticalScroll: (deltaY: Float) -> Unit = onScrollGutterDrag,
+    onClassicPinchZoomStep: (pinchDelta: Float) -> Unit = {},
+    onClassicPinchZoomEnd: () -> Unit = {},
     onScrollStep: (ticks: Int) -> Unit,
     onHorizontalPan: (deltaX: Float) -> Unit,
     onTwoFingerHorizontalSwipe: (deltaX: Float) -> Unit,
@@ -97,6 +98,15 @@ fun UnifiedControlScreen(
 ) {
     var showAirTuning by remember { mutableStateOf(false) }
 
+    val morphFraction by animateFloatAsState(
+        targetValue = if (airMouseExpanded) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = 0.84f,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "unified_control_morph_fraction"
+    )
+
     val morphPillBg by animateColorAsState(
         targetValue = if (airMouseExpanded) RubyPrimary else SurfaceCharcoal,
         animationSpec = tween(220),
@@ -116,7 +126,7 @@ fun UnifiedControlScreen(
             .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
         verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        // Top Header Bar: Horizontal Pan Gutter + One-Tap Air Mouse Morph Button
+        // Top Header Bar: Unified Notched Horizontal Pan Rail + Morph Mode Toggle Button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -125,7 +135,7 @@ fun UnifiedControlScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (settings.showHorizontalScrollGutter) {
-                HorizontalScrollGutter(
+                UnifiedHorizontalPanRail(
                     onStep = onHorizontalStep,
                     onPan = onHorizontalPan,
                     modifier = Modifier.weight(1f)
@@ -172,128 +182,186 @@ fun UnifiedControlScreen(
             }
         }
 
-        // Animated Morph Zone between Trackpad Mode & Air Mouse Mode
-        AnimatedContent(
-            targetState = airMouseExpanded,
-            transitionSpec = {
-                if (targetState) {
-                    (slideInVertically { -it / 6 } + fadeIn(tween(240)) + scaleIn(initialScale = 0.96f)) togetherWith
-                        (slideOutVertically { -it / 6 } + fadeOut(tween(180)) + scaleOut(targetScale = 0.96f))
-                } else {
-                    (slideInVertically { it / 6 } + fadeIn(tween(240)) + scaleIn(initialScale = 0.96f)) togetherWith
-                        (slideOutVertically { it / 6 } + fadeOut(tween(180)) + scaleOut(targetScale = 0.96f))
-                }
-            },
-            label = "unified_control_morph",
+        AnimatedVisibility(
+            visible = airMouseExpanded && showAirTuning,
+            enter = expandVertically(tween(200)) + fadeIn(tween(140)),
+            exit = shrinkVertically(tween(180)) + fadeOut(tween(120))
+        ) {
+            AirTuningPanel(
+                settings = settings,
+                onUpdateSensitivity = onUpdateSensitivity,
+                onUpdateDeadband = onUpdateDeadband
+            )
+        }
+
+        AnimatedVisibility(
+            visible = airMouseExpanded,
+            enter = expandVertically(tween(200)) + fadeIn(tween(160)),
+            exit = shrinkVertically(tween(180)) + fadeOut(tween(130))
+        ) {
+            if (!isGyroSupported) {
+                GyroMissingBanner()
+            } else {
+                AirMouseVolumeActionsHintBar(settings = settings)
+            }
+        }
+
+        // Persistent Morph Arena: top Touchpad surface shrinks into Gyro Radar while SOL TIK / SAĞ TIK
+        // remain mounted and stretch upward into thumb paddles; UnifiedVerticalScrollRail glides alongside!
+        BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-        ) { isAirMode ->
-            if (!isAirMode) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    if (settings.buttonPosition == ButtonPosition.TOP) {
-                        MouseButtonsBar(
-                            settings = settings,
-                            onMouseButtonClick = onMouseButtonClick,
-                            onMouseButtonDown = onMouseButtonDown,
-                            onMouseButtonUp = onMouseButtonUp
-                        )
-                    }
+                .testTag("unified_control_morph_arena")
+        ) {
+            val totalHeight = maxHeight
+            val middleGap = 6.dp
+            val railWidth = 52.dp
+            val railGap = 6.dp
+            val railReservedWidth = railWidth + railGap
 
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    ) {
-                        if (settings.scrollSide == ScrollSide.LEFT) {
-                            InteractiveScrollGutter(
-                                onScrollDrag = onScrollGutterDrag,
-                                onScrollStep = onScrollStep,
-                                modifier = Modifier.padding(end = 6.dp)
-                            )
-                        }
+            val hasTouchpadRail = settings.scrollSide != ScrollSide.HIDDEN
+            val railOnLeft = settings.scrollSide == ScrollSide.LEFT
 
-                        TrackpadSurfacePanel(
-                            settings = settings,
-                            isWifiMode = isWifiMode,
-                            onTouchpadContacts = onTouchpadContacts,
-                            onTrackpadDrag = onTrackpadDrag,
-                            onScrollGutterDrag = onScrollGutterDrag,
-                            onTwoFingerHorizontalSwipe = onTwoFingerHorizontalSwipe,
-                            onTrackpadTap = onTrackpadTap,
-                            onMouseButtonClick = onMouseButtonClick,
-                            onHomeClick = onHomeClick,
-                            onRecentAppsClick = onRecentAppsClick,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .testTag("unified_trackpad_area")
-                        )
+            val airUpperTargetHeight = 108.dp.coerceAtMost((totalHeight * 0.36f).coerceAtLeast(88.dp))
+            val touchpadBottomBarHeight = 52.dp
+            val touchpadUpperHeight = (totalHeight - touchpadBottomBarHeight - middleGap).coerceAtLeast(140.dp)
 
-                        if (settings.scrollSide == ScrollSide.RIGHT) {
-                            InteractiveScrollGutter(
-                                onScrollDrag = onScrollGutterDrag,
-                                onScrollStep = onScrollStep,
-                                modifier = Modifier.padding(start = 6.dp)
-                            )
-                        }
-                    }
+            val upperHeight = lerp(touchpadUpperHeight, airUpperTargetHeight, morphFraction)
+            val lowerHeight = (totalHeight - upperHeight - middleGap).coerceAtLeast(touchpadBottomBarHeight)
+            val lowerTopY = upperHeight + middleGap
 
-                    if (settings.buttonPosition == ButtonPosition.BOTTOM || settings.buttonPosition == ButtonPosition.SPLIT) {
-                        MouseButtonsBar(
-                            settings = settings,
-                            onMouseButtonClick = onMouseButtonClick,
-                            onMouseButtonDown = onMouseButtonDown,
-                            onMouseButtonUp = onMouseButtonUp
-                        )
-                    }
-                }
+            val upperRailInset = if (hasTouchpadRail) lerp(railReservedWidth, 0.dp, morphFraction) else 0.dp
+            val lowerRailInset = lerp(0.dp, railReservedWidth, morphFraction)
+
+            val railTopY = lerp(0.dp, lowerTopY, morphFraction)
+            val railHeight = if (hasTouchpadRail) {
+                lerp(upperHeight, lowerHeight, morphFraction)
             } else {
-                // Morphed Air Mouse State: Upper Gyro Radar + Elongated Click Paddles & Vertical Scroll Rail
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                lowerHeight
+            }
+            val railAlpha = if (hasTouchpadRail) 1f else morphFraction
+
+            // 1. Upper Surface Container (TrackpadSurfacePanel morphs smoothly into GyroscopeRadarCard)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .padding(
+                        start = if (railOnLeft) upperRailInset else 0.dp,
+                        end = if (!railOnLeft) upperRailInset else 0.dp
+                    )
+                    .height(upperHeight)
+            ) {
+                if (morphFraction < 0.99f) {
+                    TrackpadSurfacePanel(
+                        settings = settings,
+                        isWifiMode = isWifiMode,
+                        onTouchpadContacts = onTouchpadContacts,
+                        onTrackpadDrag = onTrackpadDrag,
+                        onTwoFingerVerticalScroll = onTwoFingerVerticalScroll,
+                        onClassicPinchZoomStep = onClassicPinchZoomStep,
+                        onClassicPinchZoomEnd = onClassicPinchZoomEnd,
+                        onTwoFingerHorizontalSwipe = onTwoFingerHorizontalSwipe,
+                        onTrackpadTap = onTrackpadTap,
+                        onMouseButtonClick = onMouseButtonClick,
+                        onHomeClick = onHomeClick,
+                        onRecentAppsClick = onRecentAppsClick,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha((1f - morphFraction * 1.15f).coerceIn(0f, 1f))
+                            .testTag("unified_trackpad_area")
+                    )
+                }
+
+                if (morphFraction > 0.01f) {
                     GyroscopeRadarCard(
                         airMouseActive = airMouseActive,
                         telemetry = telemetry,
                         showTuning = showAirTuning,
-                        onToggleTuning = { showAirTuning = !showAirTuning }
-                    )
-
-                    AnimatedVisibility(
-                        visible = showAirTuning,
-                        enter = expandVertically(tween(200)) + fadeIn(tween(140)),
-                        exit = shrinkVertically(tween(180)) + fadeOut(tween(120))
-                    ) {
-                        AirTuningPanel(
-                            settings = settings,
-                            onUpdateSensitivity = onUpdateSensitivity,
-                            onUpdateDeadband = onUpdateDeadband
-                        )
-                    }
-
-                    if (!isGyroSupported) {
-                        GyroMissingBanner()
-                    } else {
-                        AirMouseVolumeActionsHintBar(settings = settings)
-                    }
-
-                    AirMousePaddleZone(
-                        settings = settings,
-                        onMouseButtonClick = onMouseButtonClick,
-                        onMouseButtonDown = onMouseButtonDown,
-                        onMouseButtonUp = onMouseButtonUp,
-                        onScrollWheel = { ticks -> onScrollStep(ticks) },
-                        onToggleScrollMode = onToggleScrollMode,
+                        onToggleTuning = { showAirTuning = !showAirTuning },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
+                            .fillMaxSize()
+                            .alpha(((morphFraction - 0.1f) / 0.9f).coerceIn(0f, 1f))
                     )
                 }
+            }
+
+            // 2. Persistent Click Tiles (SOL TIK, optional ORTA, SAĞ TIK) stretching from bottom bars into Air Paddles
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(y = lowerTopY)
+                    .fillMaxWidth()
+                    .padding(
+                        start = if (railOnLeft) lowerRailInset else 0.dp,
+                        end = if (!railOnLeft) lowerRailInset else 0.dp
+                    )
+                    .height(lowerHeight),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MorphableMouseButtonTile(
+                    title = "SOL TIK",
+                    compactSubtitle = "Seç / Sürükle",
+                    expandedSubtitle = "BİRİNCİL TIKLAMA",
+                    morphFraction = morphFraction,
+                    accentColor = RubyPrimary,
+                    onClick = { onMouseButtonClick(MouseButton.LEFT) },
+                    onDown = { onMouseButtonDown(MouseButton.LEFT) },
+                    onUp = { onMouseButtonUp(MouseButton.LEFT) },
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .testTag(if (airMouseExpanded) "air_mouse_left_btn" else "mouse_btn_left")
+                )
+
+                if (settings.showMiddleClick && morphFraction < 0.7f) {
+                    val middleWeight = ((1f - morphFraction / 0.7f) * 0.8f).coerceAtLeast(0.01f)
+                    MorphableMouseButtonTile(
+                        title = "ORTA",
+                        compactSubtitle = "Tekerlek",
+                        expandedSubtitle = "ORTA TIK",
+                        morphFraction = morphFraction,
+                        accentColor = RubyAccent,
+                        onClick = { onMouseButtonClick(MouseButton.MIDDLE) },
+                        onDown = { onMouseButtonDown(MouseButton.MIDDLE) },
+                        onUp = { onMouseButtonUp(MouseButton.MIDDLE) },
+                        modifier = Modifier
+                            .weight(middleWeight)
+                            .alpha((1f - morphFraction * 1.4f).coerceIn(0f, 1f))
+                            .testTag("mouse_btn_middle")
+                    )
+                }
+
+                if (settings.showRightClick || morphFraction > 0.05f) {
+                    MorphableMouseButtonTile(
+                        title = "SAĞ TIK",
+                        compactSubtitle = "Menü",
+                        expandedSubtitle = "BAĞLAM MENÜSÜ",
+                        morphFraction = morphFraction,
+                        accentColor = RubyAccent,
+                        onClick = { onMouseButtonClick(MouseButton.RIGHT) },
+                        onDown = { onMouseButtonDown(MouseButton.RIGHT) },
+                        onUp = { onMouseButtonUp(MouseButton.RIGHT) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag(if (airMouseExpanded) "air_mouse_right_btn" else "mouse_btn_right")
+                    )
+                }
+            }
+
+            // 3. Persistent Unified Vertical Scroll Rail gliding smoothly between upper touchpad and lower Air Mouse paddles
+            if (railAlpha > 0.02f) {
+                UnifiedVerticalScrollRail(
+                    scrollMode = settings.airMouseScrollMode,
+                    onToggleScrollMode = onToggleScrollMode,
+                    onScrollDrag = onScrollGutterDrag,
+                    onScrollStep = onScrollStep,
+                    modifier = Modifier
+                        .align(if (railOnLeft) Alignment.TopStart else Alignment.TopEnd)
+                        .offset(y = railTopY)
+                        .height(railHeight)
+                        .alpha(railAlpha)
+                )
             }
         }
 

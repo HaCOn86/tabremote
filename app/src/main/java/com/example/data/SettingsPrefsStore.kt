@@ -2,13 +2,16 @@ package com.example.data
 
 import android.content.Context
 import android.os.Build
+import androidx.core.content.edit
 import com.example.model.AirMouseScrollMode
 import com.example.model.AppRole
+import com.example.model.AuthSessionMode
 import com.example.model.ButtonPosition
 import com.example.model.GamepadStyle
 import com.example.model.HidProfileMode
 import com.example.model.MediaDockItemId
 import com.example.model.NavDockItemId
+import com.example.model.QuickToolId
 import com.example.model.RemoteSettings
 import com.example.model.ScrollSide
 import com.example.model.VolumeAction
@@ -23,7 +26,7 @@ class SettingsPrefsStore(context: Context) {
         val existing = prefs.getString(KEY_DEVICE_ID, null)
         if (!existing.isNullOrBlank()) return existing
         val created = "dev_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-        prefs.edit().putString(KEY_DEVICE_ID, created).apply()
+        prefs.edit { putString(KEY_DEVICE_ID, created) }
         return created
     }
 
@@ -31,8 +34,31 @@ class SettingsPrefsStore(context: Context) {
         val existing = prefs.getString(KEY_SESSION_TOKEN, null)
         if (!existing.isNullOrBlank() && existing.length >= 12) return existing
         val created = "tr_${UUID.randomUUID().toString().replace("-", "")}"
-        prefs.edit().putString(KEY_SESSION_TOKEN, created).apply()
+        prefs.edit { putString(KEY_SESSION_TOKEN, created) }
         return created
+    }
+
+    fun getAuthSessionMode(): AuthSessionMode? {
+        val raw = prefs.getString(KEY_AUTH_SESSION_MODE, null) ?: return null
+        return try {
+            AuthSessionMode.valueOf(raw)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun setAuthSessionMode(mode: AuthSessionMode?) {
+        prefs.edit {
+            if (mode == null) remove(KEY_AUTH_SESSION_MODE)
+            else putString(KEY_AUTH_SESSION_MODE, mode.name)
+        }
+    }
+
+    fun isStartupPermissionCheckDone(): Boolean =
+        prefs.getBoolean(KEY_STARTUP_PERMISSION_CHECKED, false)
+
+    fun setStartupPermissionCheckDone(done: Boolean) {
+        prefs.edit { putBoolean(KEY_STARTUP_PERMISSION_CHECKED, done) }
     }
 
     fun loadSettings(): RemoteSettings {
@@ -54,6 +80,11 @@ class SettingsPrefsStore(context: Context) {
         val hiddenMedia = parseEnumSet(
             raw = prefs.getString(KEY_HIDDEN_MEDIA, null),
             entries = MediaDockItemId.entries
+        )
+
+        val (quickActive, quickPool) = parseQuickTools(
+            rawActive = prefs.getString(KEY_QUICK_TOOLS_ACTIVE, null),
+            rawPool = prefs.getString(KEY_QUICK_TOOLS_POOL, null)
         )
 
         return RemoteSettings(
@@ -94,51 +125,77 @@ class SettingsPrefsStore(context: Context) {
             navDockOrder = navOrder,
             hiddenNavDockItems = hiddenNav,
             mediaDockOrder = mediaOrder,
-            hiddenMediaDockItems = hiddenMedia
+            hiddenMediaDockItems = hiddenMedia,
+            quickToolsActiveOrder = quickActive,
+            quickToolsPoolOrder = quickPool,
+            liveTypingMode = prefs.getBoolean(KEY_LIVE_TYPING_MODE, true)
         )
     }
 
     fun saveSettings(settings: RemoteSettings) {
-        prefs.edit()
-            .putString(KEY_APP_ROLE, settings.appRole.name)
-            .putBoolean(KEY_UNIFIED_CONTROL, settings.unifiedControlMode)
-            .putString(KEY_BT_NAME, settings.customBluetoothName)
-            .putString(KEY_LOCAL_DEVICE_NAME, settings.localDeviceName)
-            .putFloat(KEY_POINTER_SENS, settings.pointerSensitivity)
-            .putFloat(KEY_SCROLL_SENS, settings.scrollSensitivity)
-            .putBoolean(KEY_INVERT_SCROLL, settings.invertScroll)
-            .putBoolean(KEY_SHOW_H_GUTTER, settings.showHorizontalScrollGutter)
-            .putFloat(KEY_AIR_SENS, settings.airMouseSensitivity)
-            .putFloat(KEY_AIR_DEADBAND, settings.airMouseDeadband)
-            .putFloat(KEY_AIR_SMOOTH, settings.airMouseSmoothing)
-            .putString(KEY_AIR_SCROLL_MODE, settings.airMouseScrollMode.name)
-            .putString(KEY_SCROLL_SIDE, settings.scrollSide.name)
-            .putString(KEY_BTN_POS, settings.buttonPosition.name)
-            .putBoolean(KEY_SHOW_RIGHT_CLICK, settings.showRightClick)
-            .putBoolean(KEY_SHOW_MIDDLE_CLICK, settings.showMiddleClick)
-            .putBoolean(KEY_SHOW_FN_BTNS, settings.showFunctionButtons)
-            .putBoolean(KEY_TAP_TO_CLICK, settings.tapToClick)
-            .putBoolean(KEY_HAPTICS, settings.hapticsEnabled)
-            .putString(KEY_HID_PROFILE, settings.hidProfileMode.name)
-            .putString(KEY_TP_VOL_DOWN, settings.touchpadVolumeDownAction.name)
-            .putString(KEY_TP_VOL_UP, settings.touchpadVolumeUpAction.name)
-            .putString(KEY_AIR_VOL_DOWN, settings.airMouseVolumeDownAction.name)
-            .putString(KEY_AIR_VOL_UP, settings.airMouseVolumeUpAction.name)
-            .putStringSet(KEY_FAVORITES, settings.favoriteDeviceAddresses)
-            .putBoolean(KEY_TR_LAYOUT, settings.isTurkishKeyboardLayout)
-            .putBoolean(KEY_PC_NUMPAD, settings.showPcNumpad)
-            .putBoolean(KEY_PC_NUMROW, settings.showPcNumberRow)
-            .putBoolean(KEY_PC_SPLIT, settings.splitPcKeyboard)
-            .putFloat(KEY_PC_SPLIT_GAP, settings.pcSplitGapWeight)
-            .putString(KEY_GAMEPAD_STYLE, settings.gamepadStyle.name)
-            .putBoolean(KEY_GP_SWAP_LEFT, settings.swapGamepadLeftWing)
-            .putBoolean(KEY_GP_SWAP_RIGHT, settings.swapGamepadRightWing)
-            .putBoolean(KEY_GP_MIRROR, settings.mirrorGamepadHands)
-            .putString(KEY_NAV_ORDER, settings.navDockOrder.joinToString(",") { it.name })
-            .putString(KEY_HIDDEN_NAV, settings.hiddenNavDockItems.joinToString(",") { it.name })
-            .putString(KEY_MEDIA_ORDER, settings.mediaDockOrder.joinToString(",") { it.name })
-            .putString(KEY_HIDDEN_MEDIA, settings.hiddenMediaDockItems.joinToString(",") { it.name })
-            .apply()
+        prefs.edit {
+            putString(KEY_APP_ROLE, settings.appRole.name)
+            putBoolean(KEY_UNIFIED_CONTROL, settings.unifiedControlMode)
+            putString(KEY_BT_NAME, settings.customBluetoothName)
+            putString(KEY_LOCAL_DEVICE_NAME, settings.localDeviceName)
+            putFloat(KEY_POINTER_SENS, settings.pointerSensitivity)
+            putFloat(KEY_SCROLL_SENS, settings.scrollSensitivity)
+            putBoolean(KEY_INVERT_SCROLL, settings.invertScroll)
+            putBoolean(KEY_SHOW_H_GUTTER, settings.showHorizontalScrollGutter)
+            putFloat(KEY_AIR_SENS, settings.airMouseSensitivity)
+            putFloat(KEY_AIR_DEADBAND, settings.airMouseDeadband)
+            putFloat(KEY_AIR_SMOOTH, settings.airMouseSmoothing)
+            putString(KEY_AIR_SCROLL_MODE, settings.airMouseScrollMode.name)
+            putString(KEY_SCROLL_SIDE, settings.scrollSide.name)
+            putString(KEY_BTN_POS, settings.buttonPosition.name)
+            putBoolean(KEY_SHOW_RIGHT_CLICK, settings.showRightClick)
+            putBoolean(KEY_SHOW_MIDDLE_CLICK, settings.showMiddleClick)
+            putBoolean(KEY_SHOW_FN_BTNS, settings.showFunctionButtons)
+            putBoolean(KEY_TAP_TO_CLICK, settings.tapToClick)
+            putBoolean(KEY_HAPTICS, settings.hapticsEnabled)
+            putString(KEY_HID_PROFILE, settings.hidProfileMode.name)
+            putString(KEY_TP_VOL_DOWN, settings.touchpadVolumeDownAction.name)
+            putString(KEY_TP_VOL_UP, settings.touchpadVolumeUpAction.name)
+            putString(KEY_AIR_VOL_DOWN, settings.airMouseVolumeDownAction.name)
+            putString(KEY_AIR_VOL_UP, settings.airMouseVolumeUpAction.name)
+            putStringSet(KEY_FAVORITES, settings.favoriteDeviceAddresses)
+            putBoolean(KEY_TR_LAYOUT, settings.isTurkishKeyboardLayout)
+            putBoolean(KEY_PC_NUMPAD, settings.showPcNumpad)
+            putBoolean(KEY_PC_NUMROW, settings.showPcNumberRow)
+            putBoolean(KEY_PC_SPLIT, settings.splitPcKeyboard)
+            putFloat(KEY_PC_SPLIT_GAP, settings.pcSplitGapWeight)
+            putString(KEY_GAMEPAD_STYLE, settings.gamepadStyle.name)
+            putBoolean(KEY_GP_SWAP_LEFT, settings.swapGamepadLeftWing)
+            putBoolean(KEY_GP_SWAP_RIGHT, settings.swapGamepadRightWing)
+            putBoolean(KEY_GP_MIRROR, settings.mirrorGamepadHands)
+            putString(KEY_NAV_ORDER, settings.navDockOrder.joinToString(",") { it.name })
+            putString(KEY_HIDDEN_NAV, settings.hiddenNavDockItems.joinToString(",") { it.name })
+            putString(KEY_MEDIA_ORDER, settings.mediaDockOrder.joinToString(",") { it.name })
+            putString(KEY_HIDDEN_MEDIA, settings.hiddenMediaDockItems.joinToString(",") { it.name })
+            putString(KEY_QUICK_TOOLS_ACTIVE, settings.quickToolsActiveOrder.joinToString(",") { it.name })
+            putString(KEY_QUICK_TOOLS_POOL, settings.quickToolsPoolOrder.joinToString(",") { it.name })
+            putBoolean(KEY_LIVE_TYPING_MODE, settings.liveTypingMode)
+        }
+    }
+
+    private fun parseQuickTools(rawActive: String?, rawPool: String?): Pair<List<QuickToolId>, List<QuickToolId>> {
+        if (rawActive == null && rawPool == null) {
+            return QuickToolId.defaultActiveGrid to QuickToolId.defaultPool
+        }
+        val byName = QuickToolId.entries.associateBy { it.name }
+        val active = rawActive.orEmpty()
+            .split(",")
+            .filter { it.isNotBlank() }
+            .mapNotNull { byName[it] }
+            .distinct()
+        val poolExplicit = rawPool.orEmpty()
+            .split(",")
+            .filter { it.isNotBlank() }
+            .mapNotNull { byName[it] }
+            .filter { it !in active }
+            .distinct()
+        val missing = QuickToolId.entries.filter { it !in active && it !in poolExplicit }
+        return active to (poolExplicit + missing)
     }
 
     private fun <T : Enum<T>> parseEnum(raw: String?, fallback: T): T {
@@ -172,6 +229,8 @@ class SettingsPrefsStore(context: Context) {
     private companion object {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_SESSION_TOKEN = "session_token"
+        const val KEY_AUTH_SESSION_MODE = "auth_session_mode"
+        const val KEY_STARTUP_PERMISSION_CHECKED = "startup_perm_checked"
         const val KEY_APP_ROLE = "app_role"
         const val KEY_UNIFIED_CONTROL = "unified_control"
         const val KEY_BT_NAME = "bt_name"
@@ -210,5 +269,8 @@ class SettingsPrefsStore(context: Context) {
         const val KEY_HIDDEN_NAV = "hidden_nav"
         const val KEY_MEDIA_ORDER = "media_order"
         const val KEY_HIDDEN_MEDIA = "hidden_media"
+        const val KEY_QUICK_TOOLS_ACTIVE = "quick_tools_active"
+        const val KEY_QUICK_TOOLS_POOL = "quick_tools_pool"
+        const val KEY_LIVE_TYPING_MODE = "live_typing_mode"
     }
 }

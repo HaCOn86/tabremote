@@ -287,13 +287,26 @@ object HidConstants {
             0xC0.toByte()                    // END_COLLECTION (Touch Pad)
         )
 
-    /** Precision Touchpad + 5-Button Mouse + Keyboard + Consumer + Gamepad */
+    /** Precision Touchpad first so host OS identifies Touchpad + Mouse + Keyboard + Consumer + Gamepad */
     val PRECISION_COMBO_REPORT_DESCRIPTOR: ByteArray =
-        MOUSE_KEYBOARD_CONSUMER_GAMEPAD_DESCRIPTOR + PRECISION_TOUCHPAD_COLLECTION
+        PRECISION_TOUCHPAD_COLLECTION + MOUSE_KEYBOARD_CONSUMER_GAMEPAD_DESCRIPTOR
 
     /** Classic 5-Button Mouse + Keyboard + Consumer + Gamepad (No PTP digitizer collection) */
     val CLASSIC_COMBO_REPORT_DESCRIPTOR: ByteArray =
         MOUSE_KEYBOARD_CONSUMER_GAMEPAD_DESCRIPTOR
+
+    /**
+     * Natural two-finger vertical scroll conversion:
+     * Swiping two fingers UP (deltaY < 0) produces negative wheel/scroll ticks so the page moves DOWN.
+     */
+    fun twoFingerScrollDirectionSign(invertScroll: Boolean): Int =
+        if (invertScroll) -1 else 1
+
+    fun classicPinchZoomWheelTick(pinchDelta: Float): Int = when {
+        pinchDelta > 0f -> 1
+        pinchDelta < 0f -> -1
+        else -> 0
+    }
 
     // Standard Windows Precision Touchpad Certification Blob (256 bytes)
     val PTP_CERT_BLOB: ByteArray = ByteArray(256).also { arr ->

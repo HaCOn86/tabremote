@@ -122,8 +122,8 @@ fun <T> ExpressiveDockRow(
             val isRightNeighbor = pressedIndex != -1 && index == pressedIndex + 1
 
             val targetScale = when {
-                isPressed -> 1.07f
-                isLeftNeighbor || isRightNeighbor -> 0.96f
+                isPressed -> 1.04f
+                isLeftNeighbor || isRightNeighbor -> 0.97f
                 else -> 1f
             }
             val scale by animateFloatAsState(
@@ -137,8 +137,8 @@ fun <T> ExpressiveDockRow(
 
             val nudgeDp by animateDpAsState(
                 targetValue = when {
-                    isLeftNeighbor -> (-3).dp
-                    isRightNeighbor -> 3.dp
+                    isLeftNeighbor -> (-2).dp
+                    isRightNeighbor -> 2.dp
                     else -> 0.dp
                 },
                 animationSpec = spring(

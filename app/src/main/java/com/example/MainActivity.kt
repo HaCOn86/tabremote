@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -65,6 +66,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,7 +76,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -85,18 +86,25 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.DeviceSyncRepository
+import com.example.data.SettingsPrefsStore
 import com.example.model.AirMouseScrollMode
 import com.example.model.AppRole
+import com.example.model.AuthSessionMode
 import com.example.model.ConnectionStatus
 import com.example.model.InputSubMode
+import com.example.ui.components.AccessibilityAndPermissionModal
 import com.example.ui.components.BluetoothStatusDot
 import com.example.ui.components.StatusBarGlassScrim
+import com.example.ui.components.auditAppPermissions
 import com.example.ui.screens.AirMouseScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.InputsScreen
@@ -135,6 +143,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (activeViewModel?.handleKeyEvent(event) == true) {
             return true
@@ -147,11 +156,25 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation(
     onBindActiveViewModel: (RemoteViewModel?) -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val prefsStore = remember(context) { SettingsPrefsStore(context) }
+
     var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
+    var sessionMode by remember {
+        mutableStateOf(
+            if (Firebase.auth.currentUser != null) AuthSessionMode.GOOGLE
+            else prefsStore.getAuthSessionMode()
+        )
+    }
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
+            val u = auth.currentUser
+            currentUser = u
+            if (u != null) {
+                sessionMode = AuthSessionMode.GOOGLE
+                prefsStore.setAuthSessionMode(AuthSessionMode.GOOGLE)
+            }
         }
         Firebase.auth.addAuthStateListener(listener)
         onDispose {
@@ -161,17 +184,34 @@ fun AppNavigation(
     }
 
     val user = currentUser
-    if (user == null) {
+    val activeMode = when {
+        user != null -> AuthSessionMode.GOOGLE
+        sessionMode != null -> sessionMode!!
+        else -> null
+    }
+
+    if (activeMode == null) {
         LaunchedEffect(Unit) { onBindActiveViewModel(null) }
         AuthScreen(
             onAuthSuccess = {
                 currentUser = Firebase.auth.currentUser
+                sessionMode = AuthSessionMode.GOOGLE
+                prefsStore.setAuthSessionMode(AuthSessionMode.GOOGLE)
+            },
+            onContinueBluetoothOnly = {
+                sessionMode = AuthSessionMode.BLUETOOTH_ONLY
+                prefsStore.setAuthSessionMode(AuthSessionMode.BLUETOOTH_ONLY)
+            },
+            onContinueGuest = {
+                sessionMode = AuthSessionMode.GUEST_LOCAL
+                prefsStore.setAuthSessionMode(AuthSessionMode.GUEST_LOCAL)
             },
             modifier = Modifier.fillMaxSize()
         )
     } else {
-        key(user.uid) {
-            val factory = remember(user.uid) {
+        val vmKey = user?.uid ?: "local_${activeMode.name}"
+        key(vmKey) {
+            val factory = remember(vmKey) {
                 viewModelFactory {
                     initializer {
                         val app = this[APPLICATION_KEY]!!
@@ -179,12 +219,13 @@ fun AppNavigation(
                         RemoteViewModel(
                             appContext = appCtx,
                             deviceSyncRepository = DeviceSyncRepository(appCtx),
-                            currentUserId = user.uid
+                            currentUserId = user?.uid,
+                            authSessionMode = activeMode
                         )
                     }
                 }
             }
-            val vm: RemoteViewModel = viewModel(key = user.uid, factory = factory)
+            val vm: RemoteViewModel = viewModel(key = vmKey, factory = factory)
             LaunchedEffect(vm) {
                 onBindActiveViewModel(vm)
             }
@@ -193,8 +234,19 @@ fun AppNavigation(
 
             TabRemoteApp(
                 viewModel = vm,
-                userEmail = user.email.orEmpty(),
-                userDisplayName = user.displayName.orEmpty(),
+                prefsStore = prefsStore,
+                authSessionMode = activeMode,
+                userEmail = user?.email.orEmpty(),
+                userDisplayName = user?.displayName.orEmpty(),
+                onGoogleLinked = {
+                    currentUser = Firebase.auth.currentUser
+                    sessionMode = AuthSessionMode.GOOGLE
+                    prefsStore.setAuthSessionMode(AuthSessionMode.GOOGLE)
+                },
+                onReturnToAuthScreen = {
+                    sessionMode = null
+                    prefsStore.setAuthSessionMode(null)
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -204,8 +256,12 @@ fun AppNavigation(
 @Composable
 fun TabRemoteApp(
     viewModel: RemoteViewModel,
+    prefsStore: SettingsPrefsStore,
+    authSessionMode: AuthSessionMode,
     userEmail: String,
     userDisplayName: String,
+    onGoogleLinked: () -> Unit,
+    onReturnToAuthScreen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -234,6 +290,42 @@ fun TabRemoteApp(
 
     var isFullscreenInputOverlay by remember { mutableStateOf(false) }
 
+    // Accessibility & Permissions Audit Modal State
+    var permRefreshNonce by remember { mutableIntStateOf(0) }
+    val permAudit = remember(accessibilityEnabled, permRefreshNonce) {
+        auditAppPermissions(context, accessibilityEnabled)
+    }
+    var showPermissionWizard by remember {
+        mutableStateOf(
+            !prefsStore.isStartupPermissionCheckDone() &&
+                (!permAudit.accessibilityReady || !permAudit.bluetoothReady)
+        )
+    }
+    var wizardAllowSkip by remember { mutableStateOf(settings.appRole == AppRole.CONTROLLER) }
+    var wizardTitle by remember { mutableStateOf("İzinler & Erişilebilirlik Kontrolü") }
+    var wizardSubtitle by remember {
+        mutableStateOf("Alıcı tablet imleci ve Bluetooth taraması için gerekli sistem izinlerini kontrol edin.")
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshLocalEnvironment()
+                permRefreshNonce++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val wizardPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        viewModel.refreshBluetooth()
+        permRefreshNonce++
+    }
+
     LaunchedEffect(currentTab) {
         if (currentTab != NavTab.INPUTS && isFullscreenInputOverlay) {
             isFullscreenInputOverlay = false
@@ -259,6 +351,28 @@ fun TabRemoteApp(
         }
     }
 
+    if (showPermissionWizard) {
+        AccessibilityAndPermissionModal(
+            title = wizardTitle,
+            subtitle = wizardSubtitle,
+            audit = permAudit,
+            allowSkipForController = wizardAllowSkip,
+            onRequestMissingPermissions = { missing ->
+                if (missing.isNotEmpty()) {
+                    wizardPermLauncher.launch(missing.toTypedArray())
+                }
+            },
+            onRefreshStatus = {
+                viewModel.refreshLocalEnvironment()
+                permRefreshNonce++
+            },
+            onDismiss = {
+                prefsStore.setStartupPermissionCheckDone(true)
+                showPermissionWizard = false
+            }
+        )
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = BackgroundPitch,
@@ -270,7 +384,6 @@ fun TabRemoteApp(
                 .padding(innerPadding),
             contentAlignment = Alignment.TopCenter
         ) {
-            // Content extends edge-to-edge vertically behind transparent status & floating nav bar
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -316,6 +429,9 @@ fun TabRemoteApp(
                                 },
                                 onTrackpadDrag = { dx, dy -> viewModel.onTrackpadDrag(dx, dy) },
                                 onScrollGutterDrag = { dy -> viewModel.onScrollGutterDrag(dy) },
+                                onTwoFingerVerticalScroll = { dy -> viewModel.onTwoFingerVerticalScroll(dy) },
+                                onClassicPinchZoomStep = { delta -> viewModel.onClassicPinchZoomStep(delta) },
+                                onClassicPinchZoomEnd = { viewModel.onClassicPinchZoomEnd() },
                                 onScrollStep = { ticks -> viewModel.scrollStep(ticks) },
                                 onHorizontalPan = { dx -> viewModel.onHorizontalPan(dx) },
                                 onTwoFingerHorizontalSwipe = { dx ->
@@ -356,7 +472,18 @@ fun TabRemoteApp(
                                 },
                                 onTrackpadDrag = { dx, dy -> viewModel.onTrackpadDrag(dx, dy) },
                                 onScrollGutterDrag = { dy -> viewModel.onScrollGutterDrag(dy) },
+                                onTwoFingerVerticalScroll = { dy -> viewModel.onTwoFingerVerticalScroll(dy) },
+                                onClassicPinchZoomStep = { delta -> viewModel.onClassicPinchZoomStep(delta) },
+                                onClassicPinchZoomEnd = { viewModel.onClassicPinchZoomEnd() },
                                 onScrollStep = { ticks -> viewModel.scrollStep(ticks) },
+                                onToggleScrollMode = {
+                                    viewModel.updateSettings { s ->
+                                        s.copy(
+                                            airMouseScrollMode = if (s.airMouseScrollMode == AirMouseScrollMode.SCROLL_STRIP)
+                                                AirMouseScrollMode.STEP_BUTTONS else AirMouseScrollMode.SCROLL_STRIP
+                                        )
+                                    }
+                                },
                                 onHorizontalPan = { dx -> viewModel.onHorizontalPan(dx) },
                                 onTwoFingerHorizontalSwipe = { dx ->
                                     viewModel.onTouchpadTwoFingerHorizontalSwipe(dx)
@@ -383,6 +510,7 @@ fun TabRemoteApp(
                                 onMouseButtonDown = { btn -> viewModel.onMouseButtonDown(btn) },
                                 onMouseButtonUp = { btn -> viewModel.onMouseButtonUp(btn) },
                                 onScrollWheel = { ticks -> viewModel.scrollStep(ticks) },
+                                onScrollGutterDrag = { dy -> viewModel.onScrollGutterDrag(dy) },
                                 onHorizontalPan = { dx -> viewModel.onHorizontalPan(dx) },
                                 onHorizontalStep = { dir -> viewModel.stepHorizontal(dir) },
                                 onUpdateSensitivity = { sens ->
@@ -432,13 +560,16 @@ fun TabRemoteApp(
                                 },
                                 onTrackpadDrag = { dx, dy -> viewModel.onTrackpadDrag(dx, dy) },
                                 onTrackpadTap = { viewModel.onTrackpadTap() },
-                                onMoveMediaDockItem = { idx, delta -> viewModel.moveMediaDockItem(idx, delta) },
-                                onToggleMediaDockHidden = { item -> viewModel.toggleMediaDockItemHidden(item) }
+                                onMoveQuickTool = { from, to -> viewModel.moveQuickTool(from, to) },
+                                onRemoveQuickToolToPool = { tool -> viewModel.removeQuickToolToPool(tool) },
+                                onAddQuickToolFromPool = { tool -> viewModel.addQuickToolFromPool(tool) },
+                                onSetLiveTypingMode = { enabled -> viewModel.setLiveTypingMode(enabled) }
                             )
                         }
                         NavTab.SETTINGS -> {
                             SettingsScreen(
                                 settings = settings,
+                                authSessionMode = authSessionMode,
                                 userEmail = userEmail,
                                 userDisplayName = userDisplayName,
                                 localDeviceId = viewModel.localDeviceId,
@@ -453,20 +584,71 @@ fun TabRemoteApp(
                                 isScanningBluetooth = isScanningBluetooth,
                                 hidDiagnostics = hidDiagnostics,
                                 onUpdateSettings = { transform -> viewModel.updateSettings(transform) },
-                                onChangeAppRole = { role -> viewModel.setAppRole(role) },
+                                onChangeAppRole = { role ->
+                                    viewModel.setAppRole(role)
+                                    if (role == AppRole.RECEIVER && !accessibilityEnabled) {
+                                        wizardTitle = "Alıcı Modu: Erişilebilirlik Gerekli"
+                                        wizardSubtitle = "Tableti özel fare imleciyle kontrol etmek için Erişilebilirlik Servisini açın."
+                                        wizardAllowSkip = false
+                                        showPermissionWizard = true
+                                    }
+                                },
                                 onUpdateLocalCloudName = { name -> viewModel.updateLocalCloudDeviceName(name) },
                                 onRefreshEnvironment = { viewModel.refreshLocalEnvironment() },
-                                onConnectWifiReceiver = { peer -> viewModel.connectWifiReceiver(peer) },
+                                onConnectWifiReceiver = { peer ->
+                                    val freshAudit = auditAppPermissions(context, accessibilityEnabled)
+                                    if (!freshAudit.bluetoothReady) {
+                                        wizardTitle = "Bağlantı İzinleri Kontrolü"
+                                        wizardSubtitle = "Seçilen alıcıya bağlanmadan önce ağ ve yakındaki cihaz izinlerini doğrulayın."
+                                        wizardAllowSkip = true
+                                        showPermissionWizard = true
+                                    }
+                                    viewModel.connectWifiReceiver(peer)
+                                },
+                                onOpenPermissionWizard = {
+                                    permRefreshNonce++
+                                    wizardTitle = "İzinler & Android 13 Kısıtlı Ayar"
+                                    wizardSubtitle = "Erişilebilirlik Servisi ve sürüm uyumlu Bluetooth/Bildirim izin durumları."
+                                    wizardAllowSkip = settings.appRole == AppRole.CONTROLLER
+                                    showPermissionWizard = true
+                                },
+                                onGoogleAccountLinked = onGoogleLinked,
                                 onSignOut = {
                                     viewModel.prepareForSignOut()
-                                    signOutFromGoogle(credentialManager, coroutineScope)
+                                    if (authSessionMode == AuthSessionMode.GOOGLE) {
+                                        signOutFromGoogle(credentialManager, coroutineScope) {
+                                            onReturnToAuthScreen()
+                                        }
+                                    } else {
+                                        onReturnToAuthScreen()
+                                    }
                                 },
                                 onRefreshBluetooth = { viewModel.refreshBluetooth() },
                                 onToggleBluetoothScan = { viewModel.toggleBluetoothScan() },
                                 onCreateDiscoverableIntent = { viewModel.createDiscoverableIntent(120) },
                                 onRenameBluetoothDevice = { name -> viewModel.renameBluetoothDevice(name) },
-                                onPairAndConnectBluetooth = { dev -> viewModel.pairAndConnectBluetooth(dev) },
-                                onConnectDevice = { dev -> viewModel.connectToDevice(dev) },
+                                onPairAndConnectBluetooth = { dev ->
+                                    val freshAudit = auditAppPermissions(context, accessibilityEnabled)
+                                    if (!freshAudit.bluetoothReady) {
+                                        wizardTitle = "Bluetooth / Nearby İzni Gerekli"
+                                        wizardSubtitle = "Eşleştirme yapmak için Yakındaki Cihazlar / Bluetooth iznini onaylayın."
+                                        wizardAllowSkip = true
+                                        showPermissionWizard = true
+                                    } else {
+                                        viewModel.pairAndConnectBluetooth(dev)
+                                    }
+                                },
+                                onConnectDevice = { dev ->
+                                    val freshAudit = auditAppPermissions(context, accessibilityEnabled)
+                                    if (!freshAudit.bluetoothReady) {
+                                        wizardTitle = "Bluetooth İzni Gerekli"
+                                        wizardSubtitle = "Cihaza bağlanmak için Bluetooth iznini onaylayın."
+                                        wizardAllowSkip = true
+                                        showPermissionWizard = true
+                                    } else {
+                                        viewModel.connectToDevice(dev)
+                                    }
+                                },
                                 onDisconnectDevice = { viewModel.disconnectActiveTransport() },
                                 onToggleFavoriteDevice = { address -> viewModel.toggleFavoriteDevice(address) },
                                 onChangeHidProfile = { mode -> viewModel.setHidProfileMode(mode) },
@@ -479,13 +661,11 @@ fun TabRemoteApp(
             }
 
             if (!isFullscreenInputOverlay) {
-                // Soft Translucent Top Gradient behind Status Bar so scrolled content fades organically
                 StatusBarGlassScrim(
                     topInsetHeight = statusBarTopPadding,
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
 
-                // Explicit Top-Right Bluetooth / Wi-Fi Link Icon (replaces ambiguous recording dot)
                 BluetoothStatusDot(
                     connectionStatus = connectionStatus,
                     isReceiverRunning = isReceiverActive,
@@ -495,7 +675,6 @@ fun TabRemoteApp(
                         .padding(top = statusBarTopPadding, end = 6.dp)
                 )
 
-                // Progressive Bottom Gradient Scrim
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -513,7 +692,6 @@ fun TabRemoteApp(
                         )
                 )
 
-                // Floating Translucent Glass Capsule Navigation Bar
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)

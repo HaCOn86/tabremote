@@ -59,12 +59,15 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import com.example.bluetooth.HidConstants
 import com.example.bluetooth.TouchContact
+import com.example.model.AirMouseScrollMode
 import com.example.model.ButtonPosition
 import com.example.model.HidProfileMode
 import com.example.model.MouseButton
@@ -73,12 +76,12 @@ import com.example.model.RemoteSettings
 import com.example.model.ScrollSide
 import com.example.ui.components.DockOrderEditorPanel
 import com.example.ui.components.ExpressiveDockRow
+import com.example.ui.components.UnifiedHorizontalPanRail
+import com.example.ui.components.UnifiedVerticalScrollRail
 import com.example.ui.components.expressivePressDetect
 import com.example.ui.theme.RubyAccent
 import com.example.ui.theme.RubyPrimary
 import com.example.ui.theme.RubySecondary
-import com.example.ui.theme.ScrollGutterBg
-import com.example.ui.theme.ScrollGutterThumb
 import com.example.ui.theme.SurfaceBorderRuby
 import com.example.ui.theme.SurfaceCharcoal
 import com.example.ui.theme.TextMuted
@@ -98,7 +101,11 @@ fun TouchpadScreen(
     onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
     onScrollGutterDrag: (deltaY: Float) -> Unit,
+    onTwoFingerVerticalScroll: (deltaY: Float) -> Unit = onScrollGutterDrag,
+    onClassicPinchZoomStep: (pinchDelta: Float) -> Unit = {},
+    onClassicPinchZoomEnd: () -> Unit = {},
     onScrollStep: (ticks: Int) -> Unit,
+    onToggleScrollMode: () -> Unit = {},
     onHorizontalPan: (deltaX: Float) -> Unit,
     onTwoFingerHorizontalSwipe: (deltaX: Float) -> Unit,
     onHorizontalStep: (direction: Int) -> Unit,
@@ -132,7 +139,7 @@ fun TouchpadScreen(
         }
 
         if (settings.showHorizontalScrollGutter) {
-            HorizontalScrollGutter(
+            UnifiedHorizontalPanRail(
                 onStep = onHorizontalStep,
                 onPan = onHorizontalPan,
                 modifier = Modifier
@@ -147,10 +154,12 @@ fun TouchpadScreen(
                 .fillMaxWidth()
         ) {
             if (settings.scrollSide == ScrollSide.LEFT) {
-                InteractiveScrollGutter(
+                UnifiedVerticalScrollRail(
+                    scrollMode = settings.airMouseScrollMode,
+                    onToggleScrollMode = onToggleScrollMode,
                     onScrollDrag = onScrollGutterDrag,
                     onScrollStep = onScrollStep,
-                    modifier = Modifier.padding(end = 6.dp)
+                    modifier = Modifier.fillMaxHeight().padding(end = 6.dp)
                 )
             }
 
@@ -159,7 +168,9 @@ fun TouchpadScreen(
                 isWifiMode = isWifiMode,
                 onTouchpadContacts = onTouchpadContacts,
                 onTrackpadDrag = onTrackpadDrag,
-                onScrollGutterDrag = onScrollGutterDrag,
+                onTwoFingerVerticalScroll = onTwoFingerVerticalScroll,
+                onClassicPinchZoomStep = onClassicPinchZoomStep,
+                onClassicPinchZoomEnd = onClassicPinchZoomEnd,
                 onTwoFingerHorizontalSwipe = onTwoFingerHorizontalSwipe,
                 onTrackpadTap = onTrackpadTap,
                 onMouseButtonClick = onMouseButtonClick,
@@ -172,10 +183,12 @@ fun TouchpadScreen(
             )
 
             if (settings.scrollSide == ScrollSide.RIGHT) {
-                InteractiveScrollGutter(
+                UnifiedVerticalScrollRail(
+                    scrollMode = settings.airMouseScrollMode,
+                    onToggleScrollMode = onToggleScrollMode,
                     onScrollDrag = onScrollGutterDrag,
                     onScrollStep = onScrollStep,
-                    modifier = Modifier.padding(start = 6.dp)
+                    modifier = Modifier.fillMaxHeight().padding(start = 6.dp)
                 )
             }
         }
@@ -210,7 +223,9 @@ internal fun TrackpadSurfacePanel(
     isWifiMode: Boolean,
     onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
-    onScrollGutterDrag: (deltaY: Float) -> Unit,
+    onTwoFingerVerticalScroll: (deltaY: Float) -> Unit,
+    onClassicPinchZoomStep: (pinchDelta: Float) -> Unit,
+    onClassicPinchZoomEnd: () -> Unit,
     onTwoFingerHorizontalSwipe: (deltaX: Float) -> Unit,
     onTrackpadTap: () -> Unit,
     onMouseButtonClick: (MouseButton) -> Unit,
@@ -238,6 +253,7 @@ internal fun TrackpadSurfacePanel(
                         val downPointers = downEvent.changes.filter { it.pressed }
                         if (downPointers.isEmpty()) continue
 
+                        var pinchZoomActive = false
                         val startTime = System.currentTimeMillis()
                         var maxPointers = downPointers.size
                         var totalMovement = 0f
@@ -292,6 +308,10 @@ internal fun TrackpadSurfacePanel(
 
                             if (currentPressed.isEmpty()) {
                                 val duration = System.currentTimeMillis() - startTime
+                                if (pinchZoomActive) {
+                                    pinchZoomActive = false
+                                    onClassicPinchZoomEnd()
+                                }
                                 if (usePrecisionProtocol) {
                                     val releaseContacts = pointerToSlot.values.map { slot ->
                                         val coords = lastSlotCoords[slot] ?: (1600 to 1000)
@@ -363,6 +383,10 @@ internal fun TrackpadSurfacePanel(
                                 }
                             } else {
                                 if (currentPressed.size == 1) {
+                                    if (pinchZoomActive) {
+                                        pinchZoomActive = false
+                                        onClassicPinchZoomEnd()
+                                    }
                                     val change = currentPressed[0]
                                     val prevPos = lastPositions[change.id] ?: change.position
                                     val dx = change.position.x - prevPos.x
@@ -387,14 +411,20 @@ internal fun TrackpadSurfacePanel(
                                     p0.consume()
                                     p1.consume()
 
-                                    if (abs(pinchDelta) > 6f && abs(pinchDelta) > abs(avgDx) + abs(avgDy)) {
-                                        onScrollGutterDrag(if (pinchDelta > 0) -14f else 14f)
+                                    if (abs(pinchDelta) > 4.5f && abs(pinchDelta) > abs(avgDx) + abs(avgDy) * 0.9f) {
+                                        pinchZoomActive = true
+                                        onClassicPinchZoomStep(pinchDelta)
                                     } else if (abs(avgDx) > abs(avgDy) * 1.15f && abs(avgDx) > 3f) {
                                         onTwoFingerHorizontalSwipe(avgDx)
                                     } else if (abs(avgDy) > 2f) {
-                                        onScrollGutterDrag(avgDy)
+                                        // Natural 2-finger scroll: swipe UP (avgDy < 0) moves page DOWN
+                                        onTwoFingerVerticalScroll(avgDy)
                                     }
                                 } else if (currentPressed.size >= 3) {
+                                    if (pinchZoomActive) {
+                                        pinchZoomActive = false
+                                        onClassicPinchZoomEnd()
+                                    }
                                     val avgDy = currentPressed.map { ch ->
                                         val prev = lastPositions[ch.id] ?: ch.position
                                         ch.position.y - prev.y
@@ -462,293 +492,40 @@ internal fun TrackpadSurfacePanel(
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(14.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 12.dp)
         ) {
             Text(
                 text = when {
                     isWifiMode -> "WI-FI AKILLI İMLEÇ"
                     settings.hidProfileMode == HidProfileMode.PRECISION_TOUCHPAD -> "PRECISION TOUCHPAD"
-                    else -> "TOUCHPAD (KLASİK)"
+                    else -> "TOUCHPAD (KLASİK + CTRL ZOOM)"
                 },
-                color = TextMuted.copy(alpha = 0.28f),
-                fontSize = 14.sp,
+                color = TextMuted.copy(alpha = 0.34f),
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 3.sp
+                letterSpacing = 2.4.sp,
+                textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = if (usePrecisionProtocol) {
-                    "1 Parmak: İmleç • 2 Parmak: Kaydır / Zoom / Sayfa Geçişi • 3 Parmak: Ana Ekran / Son"
+                    "1 Parmak: İmleç • 2 Parmak: Doğal Kaydır / Zoom\n3 Parmak: Ana Ekran / Son Uygulamalar"
                 } else {
-                    "1 Parmak: İmleç • 2 Parmak: Yatay/Dikey Kaydır • 3 Parmak: Ana Ekran / Son"
+                    "1 Parmak: İmleç • 2 Parmak: Kaydır / Pinch Ctrl+Zoom\n3 Parmak: Ana Ekran / Son Uygulamalar"
                 },
-                color = TextMuted.copy(alpha = 0.48f),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Medium
+                color = TextMuted.copy(alpha = 0.54f),
+                fontSize = 9.5.sp,
+                lineHeight = 13.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center
             )
         }
     }
 }
 
-@Composable
-internal fun HorizontalScrollGutter(
-    onStep: (direction: Int) -> Unit,
-    onPan: (deltaX: Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    BoxWithConstraints(
-        modifier = modifier
-            .height(38.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(ScrollGutterBg)
-            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
-    ) {
-        val totalWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
-        val arrowWidthPx = with(LocalDensity.current) { 42.dp.toPx() }
-        val thumbWidthPx = with(LocalDensity.current) { 54.dp.toPx() }
-
-        val minThumbX = arrowWidthPx
-        val maxThumbX = (totalWidthPx - arrowWidthPx - thumbWidthPx).coerceAtLeast(minThumbX)
-        val centerThumbX = (minThumbX + maxThumbX) / 2f
-
-        val thumbAnimatable = remember(maxWidth) { Animatable(centerThumbX) }
-        val scope = rememberCoroutineScope()
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .width(42.dp)
-                .fillMaxHeight()
-                .clickable { onStep(-1) },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Önceki",
-                tint = RubyPrimary,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        Surface(
-            color = ScrollGutterThumb.copy(alpha = 0.22f),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .offset { IntOffset(thumbAnimatable.value.roundToInt(), 0) }
-                .width(54.dp)
-                .height(28.dp)
-                .border(1.2.dp, ScrollGutterThumb, RoundedCornerShape(8.dp))
-                .pointerInput(minThumbX, maxThumbX) {
-                    detectDragGestures(
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            val nextX = (thumbAnimatable.value + dragAmount.x).coerceIn(minThumbX, maxThumbX)
-                            scope.launch { thumbAnimatable.snapTo(nextX) }
-                            onPan(dragAmount.x)
-                        },
-                        onDragEnd = {
-                            scope.launch {
-                                thumbAnimatable.animateTo(
-                                    targetValue = centerThumbX,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
-                                    )
-                                )
-                            }
-                        },
-                        onDragCancel = {
-                            scope.launch {
-                                thumbAnimatable.animateTo(
-                                    targetValue = centerThumbX,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
-                                    )
-                                )
-                            }
-                        }
-                    )
-                }
-        ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SwapHoriz,
-                    contentDescription = "Yatay Kaydır",
-                    tint = RubyPrimary,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(modifier = Modifier.width(2.dp))
-                Text(
-                    text = "PAN",
-                    color = RubyPrimary,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .width(42.dp)
-                .fillMaxHeight()
-                .clickable { onStep(1) },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = "Sonraki",
-                tint = RubyPrimary,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun InteractiveScrollGutter(
-    onScrollDrag: (deltaY: Float) -> Unit,
-    onScrollStep: (ticks: Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    BoxWithConstraints(
-        modifier = modifier
-            .width(50.dp)
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(12.dp))
-            .background(ScrollGutterBg)
-            .border(1.2.dp, SurfaceBorderRuby, RoundedCornerShape(12.dp))
-            .testTag("dedicated_scroll_gutter")
-    ) {
-        val totalHeightPx = with(LocalDensity.current) { maxHeight.toPx() }
-        val arrowAreaHeightPx = with(LocalDensity.current) { 40.dp.toPx() }
-        val thumbHeightPx = with(LocalDensity.current) { 52.dp.toPx() }
-
-        val minThumbY = arrowAreaHeightPx
-        val maxThumbY = (totalHeightPx - arrowAreaHeightPx - thumbHeightPx).coerceAtLeast(minThumbY)
-        val centerThumbY = (minThumbY + maxThumbY) / 2f
-
-        val thumbAnimatable = remember(maxHeight) { Animatable(centerThumbY) }
-        val scope = rememberCoroutineScope()
-
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val grooveColor = SurfaceBorderRuby
-            val step = 14.dp.toPx()
-            var y = arrowAreaHeightPx + 10.dp.toPx()
-            while (y < size.height - arrowAreaHeightPx - 10.dp.toPx()) {
-                drawLine(
-                    color = grooveColor,
-                    start = Offset(14.dp.toPx(), y),
-                    end = Offset(size.width - 14.dp.toPx(), y),
-                    strokeWidth = 1.5.dp.toPx()
-                )
-                y += step
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(40.dp)
-                .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                .clickable { onScrollStep(2) },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowUp,
-                contentDescription = "Yukarı Kaydır",
-                tint = RubyPrimary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        Surface(
-            color = ScrollGutterThumb.copy(alpha = 0.25f),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset { IntOffset(0, thumbAnimatable.value.roundToInt()) }
-                .width(38.dp)
-                .height(52.dp)
-                .border(1.5.dp, ScrollGutterThumb, RoundedCornerShape(8.dp))
-                .pointerInput(minThumbY, maxThumbY) {
-                    detectDragGestures(
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            val nextY = (thumbAnimatable.value + dragAmount.y).coerceIn(minThumbY, maxThumbY)
-                            scope.launch { thumbAnimatable.snapTo(nextY) }
-                            onScrollDrag(dragAmount.y)
-                        },
-                        onDragEnd = {
-                            scope.launch {
-                                thumbAnimatable.animateTo(
-                                    targetValue = centerThumbY,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
-                                    )
-                                )
-                            }
-                        },
-                        onDragCancel = {
-                            scope.launch {
-                                thumbAnimatable.animateTo(
-                                    targetValue = centerThumbY,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
-                                    )
-                                )
-                            }
-                        }
-                    )
-                }
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SwapVert,
-                    contentDescription = "Kaydırma Tutacı",
-                    tint = RubyPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "KAYDIR",
-                    color = RubyPrimary,
-                    fontSize = 7.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(40.dp)
-                .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
-                .clickable { onScrollStep(-2) },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "Aşağı Kaydır",
-                tint = RubyPrimary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
+// Horizontal & Vertical rails migrated cleanly to UnifiedScrollRails.kt
 
 @Composable
 internal fun CustomizableNavigationDock(
@@ -1038,9 +815,11 @@ internal fun MouseButtonsBar(
 }
 
 @Composable
-private fun MouseButtonTile(
+internal fun MorphableMouseButtonTile(
     title: String,
-    subtitle: String,
+    compactSubtitle: String,
+    expandedSubtitle: String,
+    morphFraction: Float,
     accentColor: Color,
     onClick: () -> Unit,
     onDown: () -> Unit,
@@ -1048,16 +827,18 @@ private fun MouseButtonTile(
     modifier: Modifier = Modifier
 ) {
     var isPressed by remember { mutableStateOf(false) }
+    val cornerDp = lerp(12f, 16f, morphFraction).dp
+    val titleSizeSp = lerp(13f, 16f, morphFraction).sp
 
     Surface(
         color = if (isPressed) accentColor.copy(alpha = 0.28f) else SurfaceCharcoal,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(cornerDp),
         modifier = modifier
             .fillMaxHeight()
             .border(
-                1.3.dp,
+                lerp(1.3f, 1.5f, morphFraction).dp,
                 if (isPressed) accentColor else SurfaceBorderRuby,
-                RoundedCornerShape(12.dp)
+                RoundedCornerShape(cornerDp)
             )
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -1077,20 +858,55 @@ private fun MouseButtonTile(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 8.dp)
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
+            if (morphFraction > 0.25f) {
+                Box(
+                    modifier = Modifier
+                        .size((10f * morphFraction).dp)
+                        .background(
+                            if (isPressed) accentColor else SurfaceBorderRuby,
+                            androidx.compose.foundation.shape.CircleShape
+                        )
+                )
+                Spacer(modifier = Modifier.height((6f * morphFraction).dp))
+            }
             Text(
                 text = title,
                 color = if (isPressed) accentColor else TextPrimary,
-                fontSize = 13.sp,
+                fontSize = titleSizeSp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp
+                letterSpacing = 0.7.sp
             )
             Text(
-                text = subtitle,
+                text = if (morphFraction > 0.45f) expandedSubtitle else compactSubtitle,
                 color = TextSecondary,
-                fontSize = 9.5.sp
+                fontSize = 9.5.sp,
+                maxLines = 1
             )
         }
     }
+}
+
+@Composable
+private fun MouseButtonTile(
+    title: String,
+    subtitle: String,
+    accentColor: Color,
+    onClick: () -> Unit,
+    onDown: () -> Unit,
+    onUp: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    MorphableMouseButtonTile(
+        title = title,
+        compactSubtitle = subtitle,
+        expandedSubtitle = subtitle,
+        morphFraction = 0f,
+        accentColor = accentColor,
+        onClick = onClick,
+        onDown = onDown,
+        onUp = onUp,
+        modifier = modifier
+    )
 }

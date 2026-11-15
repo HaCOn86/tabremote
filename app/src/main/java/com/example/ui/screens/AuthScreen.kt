@@ -22,16 +22,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.DevicesOther
+import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,6 +62,8 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
 import com.example.ui.theme.BackgroundPitch
 import com.example.ui.theme.RedDanger
@@ -84,6 +91,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AuthScreen(
     onAuthSuccess: () -> Unit,
+    onContinueBluetoothOnly: () -> Unit = {},
+    onContinueGuest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -128,7 +137,8 @@ fun AuthScreen(
                 )
             )
             .statusBarsPadding()
-            .padding(24.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp, vertical = 20.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -136,12 +146,12 @@ fun AuthScreen(
                 .widthIn(max = 460.dp)
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Box(
                 modifier = Modifier
                     .scale(logoScale)
-                    .size(84.dp)
+                    .size(76.dp)
                     .background(RubyPrimary.copy(alpha = 0.16f), CircleShape)
                     .border(1.5.dp, RubyPrimary.copy(alpha = 0.65f), CircleShape),
                 contentAlignment = Alignment.Center
@@ -150,7 +160,7 @@ fun AuthScreen(
                     imageVector = Icons.Default.TouchApp,
                     contentDescription = "TabRemote",
                     tint = RubyPrimary,
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(36.dp)
                 )
             }
 
@@ -158,40 +168,45 @@ fun AuthScreen(
                 Text(
                     text = "TabRemote",
                     color = TextPrimary,
-                    fontSize = 28.sp,
+                    fontSize = 27.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 0.8.sp
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(5.dp))
                 Text(
-                    text = "Telefon & Tablet arasında sıfır kurulumlu Wi-Fi Erişilebilirlik kontrolü ve Bluetooth HID deneyimi.",
+                    text = "Bluetooth Touchpad HID veya Google hesabıyla Wi-Fi Alıcı tablet kontrolü. Kullanım şeklinizi seçin:",
                     color = TextSecondary,
-                    fontSize = 13.sp,
+                    fontSize = 12.5.sp,
                     textAlign = TextAlign.Center,
-                    lineHeight = 18.sp
+                    lineHeight = 17.sp
                 )
             }
 
             Surface(
                 color = SurfaceCharcoal,
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(18.dp))
+                    .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(16.dp))
             ) {
                 Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FeatureRow(
                         icon = Icons.Default.DevicesOther,
-                        title = "Otomatik Cihaz Eşleşmesi",
-                        subtitle = "Aynı Google hesabındaki tablet ve telefonlar listede otomatik görünür."
+                        title = "Google ile Otomatik Cihaz Bulma",
+                        subtitle = "Aynı hesaptaki telefon ve tabletler otomatik eşleşir, Wi-Fi Alıcı IP'si senkronlanır."
+                    )
+                    FeatureRow(
+                        icon = Icons.Default.Bluetooth,
+                        title = "Sadece Bluetooth Touchpad (Hesapsız)",
+                        subtitle = "Google hesabı veya Wi-Fi açmadan doğrudan Bluetooth HID Touchpad & Klavye bağlayın."
                     )
                     FeatureRow(
                         icon = Icons.Default.Wifi,
-                        title = "Özel İmleçli Alıcı Modu",
-                        subtitle = "Tablette Wi-Fi + Erişilebilirlik ile akıcı imleç, kaydırma ve Türkçe yazım."
+                        title = "İstediğiniz Zaman Hesap Bağlayın",
+                        subtitle = "Hesapsız veya Bluetooth modunda başlasanız bile Ayarlar'dan Google hesabınızı bağlayabilirsiniz."
                     )
                 }
             }
@@ -242,14 +257,14 @@ fun AuthScreen(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
+                    .height(52.dp)
                     .testTag("google_sign_in_button")
             ) {
                 if (isLoading || isAutoChecking) {
                     CircularProgressIndicator(
                         color = Color.White,
                         strokeWidth = 2.4.dp,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
@@ -268,10 +283,88 @@ fun AuthScreen(
                 }
             }
 
+            // Secondary Entry Options: Bluetooth-Only & Guest Mode
+            Surface(
+                color = SurfaceCharcoal,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(14.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "HESAP VEYA WI-FI KULLANMAK İSTEMİYORSANIZ",
+                        color = RubyPrimary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp
+                    )
+                    Text(
+                        text = "Google oturumu açmadan doğrudan Bluetooth HID kumanda olarak kullanabilir veya çevrimdışı devam edebilirsiniz.",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+
+                    OutlinedButton(
+                        onClick = onContinueBluetoothOnly,
+                        enabled = !isLoading,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, RubyPrimary.copy(alpha = 0.7f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("bluetooth_only_continue_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bluetooth,
+                            contentDescription = "Sadece Bluetooth Kullan",
+                            tint = RubyPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Sadece Bluetooth Kullan",
+                            color = RubyPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onContinueGuest,
+                        enabled = !isLoading,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorderRuby),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("guest_continue_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonOff,
+                            contentDescription = "Giriş Yapmadan Devam Et",
+                            tint = TextPrimary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Giriş Yapmadan Devam Et",
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
             Text(
-                text = "Yalnızca kendi cihazlarınızı listelemek için Google hesabınızla doğrulama yapılır.",
+                text = "Bulut eşlemesi için yalnızca aynı Google hesabındaki cihazlarınız listelenir.",
                 color = TextMuted,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 textAlign = TextAlign.Center
             )
         }
@@ -290,7 +383,7 @@ private fun FeatureRow(
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(34.dp)
                 .background(RubyAccent.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                 .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center
@@ -299,12 +392,12 @@ private fun FeatureRow(
                 imageVector = icon,
                 contentDescription = title,
                 tint = RubyPrimary,
-                modifier = Modifier.size(19.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Text(text = subtitle, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+            Text(text = title, color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+            Text(text = subtitle, color = TextSecondary, fontSize = 10.5.sp, lineHeight = 14.sp)
         }
     }
 }
@@ -349,6 +442,10 @@ fun attemptAutoSignIn(
             } else {
                 onUnauthenticated()
             }
+        } catch (_: NoCredentialException) {
+            onUnauthenticated()
+        } catch (_: GetCredentialException) {
+            onUnauthenticated()
         } catch (_: Exception) {
             onUnauthenticated()
         }
@@ -395,6 +492,12 @@ fun onGoogleSignInClicked(
         } catch (e: GetCredentialCancellationException) {
             Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
+        } catch (e: NoCredentialException) {
+            Log.w("Auth", "No Google credentials available on device: ${e.message}")
+            onAuthError("Cihazda kayıtlı uygun Google hesabı bulunamadı veya geçici olarak ulaşılamıyor.")
+        } catch (e: GetCredentialException) {
+            Log.e("Auth", "Google Credential error", e)
+            onAuthError(e.localizedMessage ?: "Google girişi tamamlanamadı.")
         } catch (e: Exception) {
             Log.e("Auth", "Google Sign-In failed", e)
             onAuthError(e.localizedMessage ?: "Google girişi başarısız oldu.")

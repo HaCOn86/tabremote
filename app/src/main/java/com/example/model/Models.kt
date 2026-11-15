@@ -85,6 +85,121 @@ enum class MouseButton(val mask: Int) {
     BUTTON_5(16)
 }
 
+enum class AuthSessionMode(val label: String) {
+    GOOGLE("Google Hesabı"),
+    BLUETOOTH_ONLY("Sadece Bluetooth"),
+    GUEST_LOCAL("Misafir Modu")
+}
+
+enum class QuickToolId(
+    val label: String,
+    val shortLabel: String,
+    val colSpan: Int,
+    val rowSpan: Int,
+    val isDpad: Boolean = false
+) {
+    DPAD("Yön Tuşları", "YÖN 4x4", 4, 4, isDpad = true),
+    PREV("Önceki", "ÖNCE", 1, 1),
+    NEXT("Sonraki", "SONRA", 1, 1),
+    VOL_DOWN("Ses -", "SES-", 1, 1),
+    VOL_UP("Ses +", "SES+", 1, 1),
+    MUTE("Sessiz", "SESSİZ", 1, 1),
+    PLAY_PAUSE("Oynat / Durdur", "OYNAT / DURDUR", 2, 1),
+    SPACE("Space", "SPACE", 2, 1),
+    BACKSPACE("Backspace", "GERİ SİL", 2, 1),
+    ENTER("Enter", "ENTER", 2, 1),
+    DEL("Del", "DEL", 1, 1),
+    ZOOM_IN("Yakınlaştır", "ZOOM+", 1, 1),
+    ZOOM_OUT("Uzaklaştır", "ZOOM-", 1, 1),
+    CUT("Kes", "KES", 1, 1),
+    COPY("Kopyala", "KOPYALA", 1, 1),
+    PASTE("Yapıştır", "YAPIŞTIR", 1, 1),
+    TR_CCEDIL("ç", "ç", 1, 1),
+    TR_GBREVE("ğ", "ğ", 1, 1),
+    TR_DOTLESS_I("ı", "ı", 1, 1),
+    TR_OUML("ö", "ö", 1, 1),
+    TR_SCEDIL("ş", "ş", 1, 1),
+    TR_UUML("ü", "ü", 1, 1),
+    TR_CAPITAL_I("İ", "İ", 1, 1),
+    PUNCT_COMMA(",", ",", 1, 1),
+    PUNCT_DOT(".", ".", 1, 1);
+
+    companion object {
+        val defaultActiveGrid: List<QuickToolId> = listOf(
+            PREV, NEXT, VOL_DOWN, VOL_UP, PLAY_PAUSE,
+            DPAD, SPACE, BACKSPACE, ENTER, DEL, MUTE,
+            TR_CCEDIL, TR_GBREVE, TR_DOTLESS_I, TR_OUML, TR_SCEDIL, TR_UUML
+        )
+
+        val defaultPool: List<QuickToolId> = entries.filter { it !in defaultActiveGrid }
+    }
+}
+
+data class PlacedQuickTool(
+    val tool: QuickToolId,
+    val col: Int,
+    val row: Int,
+    val colSpan: Int,
+    val rowSpan: Int
+)
+
+object QuickToolsLayoutEngine {
+    const val GRID_COLUMNS = 6
+
+    fun pack(tools: List<QuickToolId>, columns: Int = GRID_COLUMNS): Pair<List<PlacedQuickTool>, Int> {
+        if (tools.isEmpty()) return emptyList<PlacedQuickTool>() to 0
+        val occupied = mutableListOf<BooleanArray>()
+
+        fun ensureRow(r: Int) {
+            while (occupied.size <= r) {
+                occupied.add(BooleanArray(columns))
+            }
+        }
+
+        fun canPlace(startCol: Int, startRow: Int, colSpan: Int, rowSpan: Int): Boolean {
+            if (startCol + colSpan > columns) return false
+            for (r in startRow until startRow + rowSpan) {
+                ensureRow(r)
+                for (c in startCol until startCol + colSpan) {
+                    if (occupied[r][c]) return false
+                }
+            }
+            return true
+        }
+
+        fun mark(startCol: Int, startRow: Int, colSpan: Int, rowSpan: Int) {
+            for (r in startRow until startRow + rowSpan) {
+                ensureRow(r)
+                for (c in startCol until startCol + colSpan) {
+                    occupied[r][c] = true
+                }
+            }
+        }
+
+        val placed = mutableListOf<PlacedQuickTool>()
+        var maxRowUsed = 0
+        for (tool in tools) {
+            val cw = tool.colSpan.coerceIn(1, columns)
+            val rh = tool.rowSpan.coerceAtLeast(1)
+            var found = false
+            var r = 0
+            while (!found) {
+                for (c in 0..(columns - cw)) {
+                    if (canPlace(c, r, cw, rh)) {
+                        mark(c, r, cw, rh)
+                        placed.add(PlacedQuickTool(tool, c, r, cw, rh))
+                        if (r + rh > maxRowUsed) maxRowUsed = r + rh
+                        found = true
+                        break
+                    }
+                }
+                if (!found) r++
+            }
+        }
+        return placed to maxRowUsed
+    }
+}
+
 data class RemoteSettings(
     val appRole: AppRole = AppRole.CONTROLLER,
     val unifiedControlMode: Boolean = true,
@@ -137,7 +252,10 @@ data class RemoteSettings(
         MediaDockItemId.MUTE,
         MediaDockItemId.PLAY_PAUSE
     ),
-    val hiddenMediaDockItems: Set<MediaDockItemId> = emptySet()
+    val hiddenMediaDockItems: Set<MediaDockItemId> = emptySet(),
+    val quickToolsActiveOrder: List<QuickToolId> = QuickToolId.defaultActiveGrid,
+    val quickToolsPoolOrder: List<QuickToolId> = QuickToolId.defaultPool,
+    val liveTypingMode: Boolean = true
 )
 
 sealed interface ConnectionStatus {

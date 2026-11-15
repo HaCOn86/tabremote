@@ -384,37 +384,36 @@ fun LandscapePcKeyboardContent(
                         PcKeyDef("T", "", HidConstants.KEY_T)
                     )
                     val rightRow2 = if (isTurkishLayout) {
-                        listOf(
-                            PcKeyDef("Y", "", HidConstants.KEY_Y),
-                            PcKeyDef("U", "", HidConstants.KEY_U),
-                            PcKeyDef("I", "", HidConstants.KEY_I),
-                            PcKeyDef("O", "", HidConstants.KEY_O),
-                            PcKeyDef("P", "", HidConstants.KEY_P),
-                            PcKeyDef("Ğ", "", HidConstants.KEY_LEFTBRACE),
-                            PcKeyDef("Ü", "", HidConstants.KEY_RIGHTBRACE),
-                            PcKeyDef(
-                                if (!showNumberRow) "⌫" else ",",
-                                if (!showNumberRow) "" else ";",
-                                if (!showNumberRow) HidConstants.KEY_BACKSPACE else HidConstants.KEY_BACKSLASH,
-                                1.1f, isAccent = !showNumberRow
-                            )
-                        )
+                        buildList {
+                            add(PcKeyDef("Y", "", HidConstants.KEY_Y))
+                            add(PcKeyDef("U", "", HidConstants.KEY_U))
+                            add(PcKeyDef("I", "", HidConstants.KEY_I))
+                            add(PcKeyDef("O", "", HidConstants.KEY_O))
+                            add(PcKeyDef("P", "", HidConstants.KEY_P))
+                            add(PcKeyDef("Ğ", "", HidConstants.KEY_LEFTBRACE))
+                            add(PcKeyDef("Ü", "", HidConstants.KEY_RIGHTBRACE))
+                            if (!showNumberRow) {
+                                add(PcKeyDef("⌫", "", HidConstants.KEY_BACKSPACE, 1.2f, isAccent = true))
+                            }
+                        }
                     } else {
-                        listOf(
-                            PcKeyDef("Y", "", HidConstants.KEY_Y),
-                            PcKeyDef("U", "", HidConstants.KEY_U),
-                            PcKeyDef("I", "", HidConstants.KEY_I),
-                            PcKeyDef("O", "", HidConstants.KEY_O),
-                            PcKeyDef("P", "", HidConstants.KEY_P),
-                            PcKeyDef("[", "{", HidConstants.KEY_LEFTBRACE),
-                            PcKeyDef("]", "}", HidConstants.KEY_RIGHTBRACE),
-                            PcKeyDef(
-                                if (!showNumberRow) "⌫" else "\\",
-                                if (!showNumberRow) "" else "|",
-                                if (!showNumberRow) HidConstants.KEY_BACKSPACE else HidConstants.KEY_BACKSLASH,
-                                1.1f, isAccent = !showNumberRow
+                        buildList {
+                            add(PcKeyDef("Y", "", HidConstants.KEY_Y))
+                            add(PcKeyDef("U", "", HidConstants.KEY_U))
+                            add(PcKeyDef("I", "", HidConstants.KEY_I))
+                            add(PcKeyDef("O", "", HidConstants.KEY_O))
+                            add(PcKeyDef("P", "", HidConstants.KEY_P))
+                            add(PcKeyDef("[", "{", HidConstants.KEY_LEFTBRACE))
+                            add(PcKeyDef("]", "}", HidConstants.KEY_RIGHTBRACE))
+                            add(
+                                PcKeyDef(
+                                    if (!showNumberRow) "⌫" else "\\",
+                                    if (!showNumberRow) "" else "|",
+                                    if (!showNumberRow) HidConstants.KEY_BACKSPACE else HidConstants.KEY_BACKSLASH,
+                                    1.1f, isAccent = !showNumberRow
+                                )
                             )
-                        )
+                        }
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -427,7 +426,7 @@ fun LandscapePcKeyboardContent(
                             PcSplitGapSpacer(
                                 weight = animatedGapWeight,
                                 splitGapWeight = splitGapWeight,
-                                showHandle = true,
+                                showHandle = false,
                                 onUpdateSplitGapWeight = onUpdateSplitGapWeight
                             )
                         }
@@ -440,7 +439,7 @@ fun LandscapePcKeyboardContent(
                         }
                     }
 
-                    // Row 3: Caps + A..G | [split gap] | H..İ + , + Enter
+                    // Row 3: Caps + A..G | [split gap] | H..İ + , + Enter (Split moves `,` to inner center edge)
                     val leftRow3 = listOf(
                         PcKeyDef("A", "", HidConstants.KEY_A),
                         PcKeyDef("S", "", HidConstants.KEY_S),
@@ -449,24 +448,47 @@ fun LandscapePcKeyboardContent(
                         PcKeyDef("G", "", HidConstants.KEY_G)
                     )
                     val rightRow3 = if (isTurkishLayout) {
-                        listOf(
-                            PcKeyDef("H", "", HidConstants.KEY_H),
-                            PcKeyDef("J", "", HidConstants.KEY_J),
-                            PcKeyDef("K", "", HidConstants.KEY_K),
-                            PcKeyDef("L", "", HidConstants.KEY_L),
-                            PcKeyDef("Ş", "", HidConstants.KEY_SEMICOLON),
-                            PcKeyDef("İ", "", HidConstants.KEY_APOSTROPHE),
-                            PcKeyDef(",", ";", HidConstants.KEY_BACKSLASH)
-                        )
+                        if (effectiveSplit) {
+                            listOf(
+                                PcKeyDef(",", ";", HidConstants.KEY_BACKSLASH),
+                                PcKeyDef("H", "", HidConstants.KEY_H),
+                                PcKeyDef("J", "", HidConstants.KEY_J),
+                                PcKeyDef("K", "", HidConstants.KEY_K),
+                                PcKeyDef("L", "", HidConstants.KEY_L),
+                                PcKeyDef("Ş", "", HidConstants.KEY_SEMICOLON),
+                                PcKeyDef("İ", "", HidConstants.KEY_APOSTROPHE)
+                            )
+                        } else {
+                            listOf(
+                                PcKeyDef("H", "", HidConstants.KEY_H),
+                                PcKeyDef("J", "", HidConstants.KEY_J),
+                                PcKeyDef("K", "", HidConstants.KEY_K),
+                                PcKeyDef("L", "", HidConstants.KEY_L),
+                                PcKeyDef("Ş", "", HidConstants.KEY_SEMICOLON),
+                                PcKeyDef("İ", "", HidConstants.KEY_APOSTROPHE),
+                                PcKeyDef(",", ";", HidConstants.KEY_BACKSLASH)
+                            )
+                        }
                     } else {
-                        listOf(
-                            PcKeyDef("H", "", HidConstants.KEY_H),
-                            PcKeyDef("J", "", HidConstants.KEY_J),
-                            PcKeyDef("K", "", HidConstants.KEY_K),
-                            PcKeyDef("L", "", HidConstants.KEY_L),
-                            PcKeyDef(";", ":", HidConstants.KEY_SEMICOLON),
-                            PcKeyDef("'", "\"", HidConstants.KEY_APOSTROPHE)
-                        )
+                        if (effectiveSplit) {
+                            listOf(
+                                PcKeyDef("'", "\"", HidConstants.KEY_APOSTROPHE),
+                                PcKeyDef(";", ":", HidConstants.KEY_SEMICOLON),
+                                PcKeyDef("H", "", HidConstants.KEY_H),
+                                PcKeyDef("J", "", HidConstants.KEY_J),
+                                PcKeyDef("K", "", HidConstants.KEY_K),
+                                PcKeyDef("L", "", HidConstants.KEY_L)
+                            )
+                        } else {
+                            listOf(
+                                PcKeyDef("H", "", HidConstants.KEY_H),
+                                PcKeyDef("J", "", HidConstants.KEY_J),
+                                PcKeyDef("K", "", HidConstants.KEY_K),
+                                PcKeyDef("L", "", HidConstants.KEY_L),
+                                PcKeyDef(";", ":", HidConstants.KEY_SEMICOLON),
+                                PcKeyDef("'", "\"", HidConstants.KEY_APOSTROPHE)
+                            )
+                        }
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -488,7 +510,7 @@ fun LandscapePcKeyboardContent(
                             PcSplitGapSpacer(
                                 weight = animatedGapWeight,
                                 splitGapWeight = splitGapWeight,
-                                showHandle = true,
+                                showHandle = false,
                                 onUpdateSplitGapWeight = onUpdateSplitGapWeight
                             )
                         }
@@ -498,7 +520,7 @@ fun LandscapePcKeyboardContent(
                         PcKeyTile("Enter", hidCode = HidConstants.KEY_ENTER, weight = 1.65f, accent = true, onTap = { dispatchKey(HidConstants.KEY_ENTER) })
                     }
 
-                    // Row 4: Shift + Z..B (Removed stray < > symbol beside Z / below A!) | [split gap] | N..Ç + Up + Shift
+                    // Row 4: Shift + Z..B | [split gap] | N..Ç + . + Up + Shift (Split moves `.` to inner center edge)
                     val leftRow4 = listOf(
                         PcKeyDef("Z", "", HidConstants.KEY_Z),
                         PcKeyDef("X", "", HidConstants.KEY_X),
@@ -507,21 +529,41 @@ fun LandscapePcKeyboardContent(
                         PcKeyDef("B", "", HidConstants.KEY_B)
                     )
                     val rightRow4 = if (isTurkishLayout) {
-                        listOf(
-                            PcKeyDef("N", "", HidConstants.KEY_N),
-                            PcKeyDef("M", "", HidConstants.KEY_M),
-                            PcKeyDef("Ö", "", HidConstants.KEY_COMMA),
-                            PcKeyDef("Ç", "", HidConstants.KEY_DOT),
-                            PcKeyDef(".", ":", HidConstants.KEY_SLASH)
-                        )
+                        if (effectiveSplit) {
+                            listOf(
+                                PcKeyDef(".", ":", HidConstants.KEY_SLASH),
+                                PcKeyDef("N", "", HidConstants.KEY_N),
+                                PcKeyDef("M", "", HidConstants.KEY_M),
+                                PcKeyDef("Ö", "", HidConstants.KEY_COMMA),
+                                PcKeyDef("Ç", "", HidConstants.KEY_DOT)
+                            )
+                        } else {
+                            listOf(
+                                PcKeyDef("N", "", HidConstants.KEY_N),
+                                PcKeyDef("M", "", HidConstants.KEY_M),
+                                PcKeyDef("Ö", "", HidConstants.KEY_COMMA),
+                                PcKeyDef("Ç", "", HidConstants.KEY_DOT),
+                                PcKeyDef(".", ":", HidConstants.KEY_SLASH)
+                            )
+                        }
                     } else {
-                        listOf(
-                            PcKeyDef("N", "", HidConstants.KEY_N),
-                            PcKeyDef("M", "", HidConstants.KEY_M),
-                            PcKeyDef(",", "<", HidConstants.KEY_COMMA),
-                            PcKeyDef(".", ">", HidConstants.KEY_DOT),
-                            PcKeyDef("/", "?", HidConstants.KEY_SLASH)
-                        )
+                        if (effectiveSplit) {
+                            listOf(
+                                PcKeyDef(",", "<", HidConstants.KEY_COMMA),
+                                PcKeyDef(".", ">", HidConstants.KEY_DOT),
+                                PcKeyDef("/", "?", HidConstants.KEY_SLASH),
+                                PcKeyDef("N", "", HidConstants.KEY_N),
+                                PcKeyDef("M", "", HidConstants.KEY_M)
+                            )
+                        } else {
+                            listOf(
+                                PcKeyDef("N", "", HidConstants.KEY_N),
+                                PcKeyDef("M", "", HidConstants.KEY_M),
+                                PcKeyDef(",", "<", HidConstants.KEY_COMMA),
+                                PcKeyDef(".", ">", HidConstants.KEY_DOT),
+                                PcKeyDef("/", "?", HidConstants.KEY_SLASH)
+                            )
+                        }
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -540,6 +582,7 @@ fun LandscapePcKeyboardContent(
                             PcSplitGapSpacer(
                                 weight = animatedGapWeight,
                                 splitGapWeight = splitGapWeight,
+                                showHandle = false,
                                 onUpdateSplitGapWeight = onUpdateSplitGapWeight
                             )
                         }

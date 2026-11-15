@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -11,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,12 +19,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -37,38 +34,26 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.KeyboardBackspace
-import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.automirrored.filled.VolumeDown
-import androidx.compose.material.icons.automirrored.filled.VolumeMute
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardAlt
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.SpaceBar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -88,7 +73,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -101,11 +85,9 @@ import com.example.bluetooth.HidConstants
 import com.example.bluetooth.TouchContact
 import com.example.model.GamepadStyle
 import com.example.model.InputSubMode
-import com.example.model.MediaDockItemId
+import com.example.model.QuickToolId
 import com.example.model.RemoteSettings
-import com.example.ui.components.DockOrderEditorPanel
-import com.example.ui.components.ExpressiveDockRow
-import com.example.ui.components.expressivePressDetect
+import com.example.ui.components.QuickToolsGridSection
 import com.example.ui.theme.GreenSuccess
 import com.example.ui.theme.RubyAccent
 import com.example.ui.theme.RubyPrimary
@@ -134,8 +116,10 @@ fun InputsScreen(
     onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
     onTrackpadTap: () -> Unit,
-    onMoveMediaDockItem: (index: Int, delta: Int) -> Unit = { _, _ -> },
-    onToggleMediaDockHidden: (MediaDockItemId) -> Unit = {},
+    onMoveQuickTool: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onRemoveQuickToolToPool: (QuickToolId) -> Unit = {},
+    onAddQuickToolFromPool: (QuickToolId) -> Unit = {},
+    onSetLiveTypingMode: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val activeViewKey = if (isFullscreenOverlay) selectedSubMode else InputSubMode.SMART_KEYBOARD
@@ -223,10 +207,10 @@ fun InputsScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .statusBarsPadding()
-                        .padding(top = 4.dp, start = 4.dp, end = 4.dp),
+                        .padding(top = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Top Mode Bar with unclipped "Akıllı Klavye" label and crimson flash launch
+                    // Top Mode Bar with balanced weights & zero edge clipping
                     Surface(
                         color = SurfaceCharcoal,
                         shape = RoundedCornerShape(12.dp),
@@ -235,10 +219,11 @@ fun InputsScreen(
                             .padding(end = 46.dp)
                             .height(42.dp)
                             .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(12.dp))
-                            .padding(3.dp)
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             InputModeTab(
@@ -246,7 +231,7 @@ fun InputsScreen(
                                 icon = Icons.Default.Keyboard,
                                 selected = highlightedLaunchTab == null,
                                 onClick = { highlightedLaunchTab = null },
-                                modifier = Modifier.weight(1.38f).testTag("input_mode_smart")
+                                modifier = Modifier.weight(1.42f).testTag("input_mode_smart")
                             )
                             InputModeTab(
                                 label = "PC Klavye",
@@ -259,7 +244,7 @@ fun InputsScreen(
                                         onEnterFullscreenMode(InputSubMode.PC_KEYBOARD)
                                     }
                                 },
-                                modifier = Modifier.weight(1.02f).testTag("input_mode_pc")
+                                modifier = Modifier.weight(1.04f).testTag("input_mode_pc")
                             )
                             InputModeTab(
                                 label = "Gamepad",
@@ -272,7 +257,7 @@ fun InputsScreen(
                                         onEnterFullscreenMode(InputSubMode.GAMEPAD)
                                     }
                                 },
-                                modifier = Modifier.weight(0.95f).testTag("input_mode_gamepad")
+                                modifier = Modifier.weight(0.94f).testTag("input_mode_gamepad")
                             )
                         }
                     }
@@ -282,8 +267,10 @@ fun InputsScreen(
                         onSendText = onSendText,
                         onSendKey = onSendKey,
                         onSendConsumerKey = onSendConsumerKey,
-                        onMoveMediaDockItem = onMoveMediaDockItem,
-                        onToggleMediaDockHidden = onToggleMediaDockHidden,
+                        onMoveQuickTool = onMoveQuickTool,
+                        onRemoveQuickToolToPool = onRemoveQuickToolToPool,
+                        onAddQuickToolFromPool = onAddQuickToolFromPool,
+                        onSetLiveTypingMode = onSetLiveTypingMode,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -307,18 +294,20 @@ private fun InputModeTab(
     )
     Surface(
         color = bg,
-        shape = RoundedCornerShape(9.dp),
+        shape = RoundedCornerShape(8.dp),
         modifier = modifier
             .fillMaxSize()
             .then(
-                if (selected) Modifier.border(1.dp, RubyPrimary.copy(alpha = 0.7f), RoundedCornerShape(9.dp))
+                if (selected) Modifier.border(1.dp, RubyPrimary.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
                 else Modifier
             )
-            .clip(RoundedCornerShape(9.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable { onClick() }
     ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -328,14 +317,14 @@ private fun InputModeTab(
                 tint = if (selected) RubyPrimary else TextMuted,
                 modifier = Modifier.size(13.dp)
             )
-            Spacer(modifier = Modifier.width(3.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = label,
                 color = if (selected) RubyPrimary else TextSecondary,
-                fontSize = 9.5.sp,
+                fontSize = 9.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 softWrap = false,
-                overflow = TextOverflow.Visible,
+                overflow = TextOverflow.Ellipsis,
                 maxLines = 1
             )
         }
@@ -348,35 +337,67 @@ private fun SmartKeyboardSubView(
     onSendText: (String) -> Unit,
     onSendKey: (hidKeyCode: Int, modifier: Int) -> Unit,
     onSendConsumerKey: (usageCode: Int, name: String) -> Unit,
-    onMoveMediaDockItem: (index: Int, delta: Int) -> Unit,
-    onToggleMediaDockHidden: (MediaDockItemId) -> Unit,
+    onMoveQuickTool: (fromIndex: Int, toIndex: Int) -> Unit,
+    onRemoveQuickToolToPool: (QuickToolId) -> Unit,
+    onAddQuickToolFromPool: (QuickToolId) -> Unit,
+    onSetLiveTypingMode: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var inputText by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    var liveTypingMode by remember { mutableStateOf(true) }
-    var showMediaEditor by remember { mutableStateOf(false) }
+    val liveTypingMode = settings.liveTypingMode
 
-    val imeBottomPadding = WindowInsets.ime.asPaddingValues(LocalDensity.current).calculateBottomPadding()
-    val isImeOpen = imeBottomPadding > 10.dp
+    // Continuous smooth bottom clearance: eliminates IME closing jump below bottom FloatingNavigationCapsule
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val imeAboveNav = (imeBottom - navBarBottom).coerceAtLeast(0.dp)
+    val smoothBottomClearance = maxOf(imeAboveNav + 6.dp, 74.dp)
 
-    val visibleMediaItems = remember(settings.mediaDockOrder, settings.hiddenMediaDockItems) {
-        settings.mediaDockOrder.filter { it !in settings.hiddenMediaDockItems }
+    fun dispatchQuickTool(tool: QuickToolId) {
+        when (tool) {
+            QuickToolId.PREV -> onSendConsumerKey(HidConstants.CONSUMER_PREV_TRACK, "Prev")
+            QuickToolId.NEXT -> onSendConsumerKey(HidConstants.CONSUMER_NEXT_TRACK, "Next")
+            QuickToolId.VOL_DOWN -> onSendConsumerKey(HidConstants.CONSUMER_VOLUME_DOWN, "Vol Down")
+            QuickToolId.VOL_UP -> onSendConsumerKey(HidConstants.CONSUMER_VOLUME_UP, "Vol Up")
+            QuickToolId.MUTE -> onSendConsumerKey(HidConstants.CONSUMER_MUTE, "Mute")
+            QuickToolId.PLAY_PAUSE -> onSendConsumerKey(HidConstants.CONSUMER_PLAY_PAUSE, "Play/Pause")
+            QuickToolId.SPACE -> onSendKey(HidConstants.KEY_SPACE, 0)
+            QuickToolId.BACKSPACE -> onSendKey(HidConstants.KEY_BACKSPACE, 0)
+            QuickToolId.ENTER -> onSendKey(HidConstants.KEY_ENTER, 0)
+            QuickToolId.DEL -> onSendKey(HidConstants.KEY_DELETE, 0)
+            QuickToolId.ZOOM_IN -> onSendKey(HidConstants.KEY_EQUAL, HidConstants.MOD_LCTRL)
+            QuickToolId.ZOOM_OUT -> onSendKey(HidConstants.KEY_MINUS, HidConstants.MOD_LCTRL)
+            QuickToolId.CUT -> onSendKey(HidConstants.KEY_X, HidConstants.MOD_LCTRL)
+            QuickToolId.COPY -> onSendKey(HidConstants.KEY_C, HidConstants.MOD_LCTRL)
+            QuickToolId.PASTE -> onSendKey(HidConstants.KEY_V, HidConstants.MOD_LCTRL)
+            QuickToolId.TR_CCEDIL,
+            QuickToolId.TR_GBREVE,
+            QuickToolId.TR_DOTLESS_I,
+            QuickToolId.TR_OUML,
+            QuickToolId.TR_SCEDIL,
+            QuickToolId.TR_UUML,
+            QuickToolId.TR_CAPITAL_I,
+            QuickToolId.PUNCT_COMMA,
+            QuickToolId.PUNCT_DOT -> {
+                if (liveTypingMode) onSendText(tool.shortLabel) else inputText += tool.shortLabel
+            }
+            QuickToolId.DPAD -> Unit
+        }
     }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .imePadding()
-            .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(bottom = smoothBottomClearance),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        // Upper Scrollable Shortcuts Area
         Column(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             SectionHeader("FONKSİYON TUŞLARI")
             Row(
@@ -461,452 +482,150 @@ private fun SmartKeyboardSubView(
             }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Inline Reorder/Hide Editor for Media Dock
-        DockOrderEditorPanel(
-            visible = showMediaEditor,
-            title = "MEDYA TUŞ SIRASI & GİZLE (BASILI TUT VEYA DÜZENLE)",
-            orderedItems = settings.mediaDockOrder,
-            hiddenItems = settings.hiddenMediaDockItems,
-            labelOf = { it.label },
-            onMoveLeft = { idx -> onMoveMediaDockItem(idx, -1) },
-            onMoveRight = { idx -> onMoveMediaDockItem(idx, 1) },
-            onToggleHidden = onToggleMediaDockHidden,
-            onDone = { showMediaEditor = false },
-            modifier = Modifier.padding(bottom = 4.dp)
+        // Samsung One UI 6-Column Quick Tools Grid + Upper Spare Pool
+        QuickToolsGridSection(
+            activeTools = settings.quickToolsActiveOrder,
+            poolTools = settings.quickToolsPoolOrder,
+            liveTypingMode = liveTypingMode,
+            isTurkishLayout = settings.isTurkishKeyboardLayout,
+            onMoveQuickTool = onMoveQuickTool,
+            onRemoveToPool = onRemoveQuickToolToPool,
+            onAddFromPool = onAddQuickToolFromPool,
+            onTriggerTool = { tool -> dispatchQuickTool(tool) },
+            onSendKey = onSendKey
         )
 
-        // Customizable Media Transport & Volume Dock (Play/Pause defaults to FAR RIGHT)
-        Surface(
-            color = SurfaceCharcoal,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(44.dp)
-                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(12.dp))
-                .padding(3.dp)
-                .testTag("inputs_media_dock")
-        ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ExpressiveDockRow(
-                    items = visibleMediaItems,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    horizontalSpacing = 4.dp,
-                    itemWeight = { item ->
-                        when (item) {
-                            MediaDockItemId.PLAY_PAUSE -> 1.45f
-                            MediaDockItemId.PREV, MediaDockItemId.NEXT -> 0.9f
-                            else -> 0.8f
-                        }
-                    }
-                ) { item, _, isPressed, _, _, onPressChange ->
-                    val (icon, usage, name) = when (item) {
-                        MediaDockItemId.PREV -> Triple(Icons.Default.SkipPrevious, HidConstants.CONSUMER_PREV_TRACK, "Prev")
-                        MediaDockItemId.NEXT -> Triple(Icons.Default.SkipNext, HidConstants.CONSUMER_NEXT_TRACK, "Next")
-                        MediaDockItemId.VOL_DOWN -> Triple(Icons.AutoMirrored.Filled.VolumeDown, HidConstants.CONSUMER_VOLUME_DOWN, "Vol Down")
-                        MediaDockItemId.VOL_UP -> Triple(Icons.AutoMirrored.Filled.VolumeUp, HidConstants.CONSUMER_VOLUME_UP, "Vol Up")
-                        MediaDockItemId.MUTE -> Triple(Icons.AutoMirrored.Filled.VolumeMute, HidConstants.CONSUMER_MUTE, "Mute")
-                        MediaDockItemId.PLAY_PAUSE -> Triple(Icons.Default.PlayArrow, HidConstants.CONSUMER_PLAY_PAUSE, "Play/Pause")
-                    }
-                    DockMediaButton(
-                        icon = icon,
-                        label = item.label,
-                        isPrimary = item == MediaDockItemId.PLAY_PAUSE,
-                        isPressed = isPressed,
-                        onPressChange = onPressChange,
-                        onLongPress = { showMediaEditor = !showMediaEditor },
-                        onClick = { onSendConsumerKey(usage, name) },
-                        modifier = Modifier.fillMaxSize().testTag("media_dock_${item.name.lowercase()}")
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(width = 28.dp, height = 36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { showMediaEditor = !showMediaEditor }
-                        .testTag("edit_media_dock_btn"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Medya Tuş Sırasını Düzenle",
-                        tint = if (showMediaEditor) RubyPrimary else TextMuted,
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Lower Ergonomic Cluster: Core Actions (Left) + Seamless D-Pad (Right)
-        Surface(
-            color = SurfaceCharcoal,
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(14.dp))
-                .padding(7.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        KeyTile(
-                            label = "SPACE",
-                            icon = Icons.Default.SpaceBar,
-                            onClick = { onSendKey(HidConstants.KEY_SPACE, 0) },
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        )
-                        KeyTile(
-                            label = "BACKSPACE",
-                            icon = Icons.AutoMirrored.Filled.KeyboardBackspace,
-                            accentColor = RubyAccent,
-                            onClick = { onSendKey(HidConstants.KEY_BACKSPACE, 0) },
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        KeyTile(
-                            label = "DEL",
-                            accentColor = TextSecondary,
-                            onClick = { onSendKey(HidConstants.KEY_DELETE, 0) },
-                            modifier = Modifier.weight(0.7f).height(44.dp)
-                        )
-                        KeyTile(
-                            label = "ENTER",
-                            icon = Icons.AutoMirrored.Filled.KeyboardReturn,
-                            accentColor = RubyPrimary,
-                            onClick = { onSendKey(HidConstants.KEY_ENTER, 0) },
-                            modifier = Modifier.weight(1.3f).height(44.dp)
-                        )
-                    }
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    BigArrowButton(
-                        icon = Icons.Default.KeyboardArrowUp,
-                        contentDescription = "Yukarı Ok",
-                        onClick = { onSendKey(HidConstants.KEY_UP, 0) }
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        BigArrowButton(
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Sol Ok",
-                            onClick = { onSendKey(HidConstants.KEY_LEFT, 0) }
-                        )
-                        BigArrowButton(
-                            icon = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Aşağı Ok",
-                            onClick = { onSendKey(HidConstants.KEY_DOWN, 0) }
-                        )
-                        BigArrowButton(
-                            icon = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Sağ Ok",
-                            onClick = { onSendKey(HidConstants.KEY_RIGHT, 0) }
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Typing Mode Bar
+        // Clean Single-Line/Single-Border Text Input + Fixed Right Live/Wait Mode Toggle (No Outer Pill Wrapper!)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                color = if (liveTypingMode) RubyPrimary.copy(alpha = 0.2f) else SurfaceCharcoal,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .border(
-                        1.dp,
-                        if (liveTypingMode) RubyPrimary else GreenSuccess.copy(alpha = 0.7f),
-                        RoundedCornerShape(8.dp)
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = { newText ->
+                    if (liveTypingMode && newText.length > inputText.length) {
+                        val addedChars = newText.substring(inputText.length)
+                        onSendText(addedChars)
+                    } else if (liveTypingMode && newText.length < inputText.length) {
+                        val diff = inputText.length - newText.length
+                        repeat(diff) { onSendKey(HidConstants.KEY_BACKSPACE, 0) }
+                    }
+                    inputText = newText
+                },
+                placeholder = {
+                    Text(
+                        if (liveTypingMode) "Anlık yazmak için dokunun..." else "Taslak yazın ve gönderin...",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { liveTypingMode = !liveTypingMode }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .testTag("live_batch_typing_toggle")
-            ) {
-                Text(
-                    text = if (liveTypingMode) "CANLI YAZIM (Anlık İlet)" else "BEKLET & GÖNDER (Taslak Düzenle)",
-                    color = if (liveTypingMode) RubyPrimary else GreenSuccess,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Text(
-                text = if (settings.isTurkishKeyboardLayout) "TR-Q" else "US-EN",
-                color = TextMuted,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        Spacer(modifier = Modifier.height(3.dp))
-
-        // Turkish Character Quick-Access Bar
-        Surface(
-            color = SurfaceCharcoal,
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
-                .padding(horizontal = 4.dp, vertical = 4.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val trChars = listOf("ç", "ğ", "ı", "ö", "ş", "ü", "İ", ",", ".")
-                trChars.forEach { charStr ->
-                    Surface(
-                        color = SurfaceContainerCharcoal,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(34.dp)
-                            .padding(horizontal = 2.dp)
-                            .border(1.dp, RubyPrimary.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
-                                if (liveTypingMode) {
-                                    onSendText(charStr)
-                                } else {
-                                    inputText += charStr
-                                }
-                            }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = charStr,
-                                color = RubyPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
+                },
+                singleLine = true,
+                trailingIcon = {
+                    if (inputText.isNotEmpty()) {
+                        IconButton(onClick = { inputText = "" }) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Temizle",
+                                tint = TextMuted,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(3.dp))
-
-        // Flush Messaging Input Box
-        Surface(
-            color = SurfaceCharcoal,
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.5.dp, RubyPrimary.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { newText ->
-                        if (liveTypingMode && newText.length > inputText.length) {
-                            val addedChars = newText.substring(inputText.length)
-                            onSendText(addedChars)
-                        } else if (liveTypingMode && newText.length < inputText.length) {
-                            val diff = inputText.length - newText.length
-                            repeat(diff) { onSendKey(HidConstants.KEY_BACKSPACE, 0) }
-                        }
-                        inputText = newText
-                    },
-                    placeholder = {
-                        Text(
-                            if (liveTypingMode) "Anlık yazmak için dokunun..." else "Taslak yazın, düzenleyin ve GÖNDER'e basın...",
-                            color = TextMuted,
-                            fontSize = 11.sp
-                        )
-                    },
-                    trailingIcon = {
-                        if (inputText.isNotEmpty()) {
-                            IconButton(onClick = { inputText = "" }) {
-                                Icon(
-                                    imageVector = Icons.Default.Clear,
-                                    contentDescription = "Temizle",
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = SurfaceContainerCharcoal,
-                        unfocusedContainerColor = SurfaceContainerCharcoal,
-                        focusedBorderColor = RubyPrimary,
-                        unfocusedBorderColor = SurfaceBorderRuby,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(
-                        onSend = {
-                            if (!liveTypingMode && inputText.isNotEmpty()) {
-                                onSendText(inputText)
-                                inputText = ""
-                            } else {
-                                onSendKey(HidConstants.KEY_ENTER, 0)
-                            }
-                            focusManager.clearFocus()
-                        }
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .testTag("soft_keyboard_input_field")
-                )
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Surface(
-                    color = RubyPrimary,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .height(46.dp)
-                        .width(if (!liveTypingMode && inputText.isNotEmpty()) 68.dp else 46.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable {
-                            if (inputText.isNotEmpty()) {
-                                if (!liveTypingMode) {
-                                    onSendText(inputText)
-                                }
-                                inputText = ""
-                                onSendKey(HidConstants.KEY_ENTER, 0)
-                            } else {
-                                liveTypingMode = !liveTypingMode
-                            }
-                        }
-                        .testTag("keyboard_send_btn")
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (inputText.isNotEmpty() || !liveTypingMode) {
-                                Icons.AutoMirrored.Filled.Send
-                            } else {
-                                Icons.Default.Keyboard
-                            },
-                            contentDescription = "Gönder",
-                            tint = Color.White,
-                            modifier = Modifier.size(19.dp)
-                        )
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = SurfaceContainerCharcoal,
+                    unfocusedContainerColor = SurfaceContainerCharcoal,
+                    focusedBorderColor = RubyPrimary,
+                    unfocusedBorderColor = SurfaceBorderRuby,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary
+                ),
+                shape = RoundedCornerShape(12.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
                         if (!liveTypingMode && inputText.isNotEmpty()) {
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text("YAZ", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            onSendText(inputText)
+                            inputText = ""
+                        } else {
+                            onSendKey(HidConstants.KEY_ENTER, 0)
+                        }
+                        focusManager.clearFocus()
+                    }
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester)
+                    .testTag("soft_keyboard_input_field")
+            )
+
+            // Send / Enter action button
+            Surface(
+                color = RubyPrimary,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        if (inputText.isNotEmpty()) {
+                            if (!liveTypingMode) {
+                                onSendText(inputText)
+                            }
+                            inputText = ""
+                            onSendKey(HidConstants.KEY_ENTER, 0)
+                        } else {
+                            onSendKey(HidConstants.KEY_ENTER, 0)
                         }
                     }
+                    .testTag("keyboard_send_btn")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Gönder / Enter",
+                        tint = Color.White,
+                        modifier = Modifier.size(19.dp)
+                    )
                 }
             }
-        }
 
-        if (!isImeOpen) {
-            Spacer(modifier = Modifier.height(72.dp))
-        }
-    }
-}
-
-@Composable
-private fun DockMediaButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    isPrimary: Boolean,
-    isPressed: Boolean,
-    onPressChange: (Boolean) -> Unit,
-    onLongPress: () -> Unit,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val bg by animateColorAsState(
-        targetValue = when {
-            isPressed -> RubyPrimary
-            isPrimary -> RubyPrimary.copy(alpha = 0.18f)
-            else -> SurfaceContainerCharcoal
-        },
-        animationSpec = tween(130),
-        label = "media_btn_bg"
-    )
-    Surface(
-        color = bg,
-        shape = RoundedCornerShape(8.dp),
-        modifier = modifier
-            .fillMaxHeight()
-            .border(
-                1.dp,
-                if (isPrimary || isPressed) RubyPrimary.copy(alpha = 0.65f) else SurfaceBorderRuby,
-                RoundedCornerShape(8.dp)
-            )
-            .clip(RoundedCornerShape(8.dp))
-            .expressivePressDetect(
-                key = label,
-                onPressChange = onPressChange,
-                onLongPress = onLongPress,
-                onTap = onClick
-            )
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = when {
-                    isPressed -> Color.White
-                    isPrimary -> RubyPrimary
-                    else -> TextPrimary
-                },
-                modifier = Modifier.size(14.dp)
-            )
-            if (isPrimary) {
-                Spacer(modifier = Modifier.width(3.dp))
-                Text(
-                    text = label,
-                    color = if (isPressed) Color.White else RubyPrimary,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    softWrap = false,
-                    maxLines = 1
-                )
+            // Independent Fixed Right-Side Live / Wait Mode Toggle Button
+            Surface(
+                color = if (liveTypingMode) RubyPrimary.copy(alpha = 0.2f) else SurfaceCharcoal,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .height(48.dp)
+                    .border(
+                        1.2.dp,
+                        if (liveTypingMode) RubyPrimary else GreenSuccess.copy(alpha = 0.7f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onSetLiveTypingMode(!liveTypingMode) }
+                    .padding(horizontal = 10.dp)
+                    .testTag("live_batch_typing_toggle")
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = if (liveTypingMode) Icons.Default.Bolt else Icons.Default.Pause,
+                        contentDescription = if (liveTypingMode) "Canlı Yazım Aktif" else "Bekleme Modu Aktif",
+                        tint = if (liveTypingMode) RubyPrimary else GreenSuccess,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (liveTypingMode) "CANLI" else "BEKLE",
+                        color = if (liveTypingMode) RubyPrimary else GreenSuccess,
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        softWrap = false
+                    )
+                }
             }
         }
     }
@@ -937,7 +656,7 @@ private fun SpaciousKeyTile(
         color = SurfaceCharcoal,
         shape = RoundedCornerShape(10.dp),
         modifier = modifier
-            .height(46.dp)
+            .height(44.dp)
             .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
             .clip(RoundedCornerShape(10.dp))
             .clickable { onClick() }
@@ -975,73 +694,6 @@ private fun SpaciousKeyTile(
                 fontSize = 8.sp,
                 fontWeight = FontWeight.Normal,
                 maxLines = 1
-            )
-        }
-    }
-}
-
-@Composable
-private fun KeyTile(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
-    accentColor: Color = TextPrimary,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = SurfaceCharcoal,
-        shape = RoundedCornerShape(10.dp),
-        modifier = modifier
-            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = accentColor,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-            }
-            Text(
-                text = label,
-                color = accentColor,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-    }
-}
-
-@Composable
-private fun BigArrowButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit
-) {
-    Surface(
-        color = SurfaceCharcoal,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier
-            .size(44.dp)
-            .border(1.2.dp, SurfaceBorderRuby, RoundedCornerShape(8.dp))
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { onClick() }
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = RubyPrimary,
-                modifier = Modifier.size(22.dp)
             )
         }
     }

@@ -107,10 +107,79 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify HID descriptor contains Precision Touchpad and Gamepad collections`() {
+    fun `verify HID descriptor contains Precision Touchpad first and Gamepad collections`() {
         assertTrue(HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR.size > HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR.size)
+        // Must lead with Digitizers (0x05, 0x0D) / Touch Pad (0x09, 0x05) so hosts identify it as a Touchpad
+        assertEquals(0x05.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[0])
+        assertEquals(0x0D.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[1])
+        assertEquals(0x09.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[2])
+        assertEquals(0x05.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[3])
         assertEquals(256, HidConstants.PTP_CERT_BLOB.size)
         assertEquals(4.toByte(), HidConstants.REPORT_ID_TOUCHPAD)
         assertEquals(9.toByte(), HidConstants.REPORT_ID_GAMEPAD)
     }
+
+    @Test
+    fun `verify natural two-finger scroll direction and classic pinch zoom wheel ticks`() {
+        assertEquals(1, HidConstants.twoFingerScrollDirectionSign(invertScroll = false))
+        assertEquals(-1, HidConstants.twoFingerScrollDirectionSign(invertScroll = true))
+
+        // Spreading 2 fingers apart zooms in (+1 wheel tick while Ctrl held)
+        assertEquals(1, HidConstants.classicPinchZoomWheelTick(15f))
+        // Pinching 2 fingers together zooms out (-1 wheel tick while Ctrl held)
+        assertEquals(-1, HidConstants.classicPinchZoomWheelTick(-15f))
+        assertEquals(0, HidConstants.classicPinchZoomWheelTick(0f))
+    }
+
+    @Test
+    fun `verify 6-column QuickToolsLayoutEngine packs 4x4 D-Pad and 2x1 and 1x1 without overlap`() {
+        val (placed, rowCount) = com.example.model.QuickToolsLayoutEngine.pack(
+            tools = com.example.model.QuickToolId.defaultActiveGrid,
+            columns = 6
+        )
+        assertEquals(com.example.model.QuickToolId.defaultActiveGrid.size, placed.size)
+        assertEquals(6, rowCount)
+
+        val grid = Array(rowCount) { BooleanArray(6) }
+        for (item in placed) {
+            assertTrue(item.col >= 0 && item.col + item.colSpan <= 6)
+            assertTrue(item.row >= 0 && item.row + item.rowSpan <= rowCount)
+            for (r in item.row until item.row + item.rowSpan) {
+                for (c in item.col until item.col + item.colSpan) {
+                    assertFalse("Overlap at row=$r col=$c for ${item.tool}", grid[r][c])
+                    grid[r][c] = true
+                }
+            }
+        }
+        val dpad = placed.first { it.tool == com.example.model.QuickToolId.DPAD }
+        assertEquals(4, dpad.colSpan)
+        assertEquals(4, dpad.rowSpan)
+    }
+
+    @Test
+    fun `verify SettingsPrefsStore persists AuthSessionMode QuickTools and liveTypingMode`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val store = com.example.data.SettingsPrefsStore(context)
+
+        store.setAuthSessionMode(com.example.model.AuthSessionMode.BLUETOOTH_ONLY)
+        assertEquals(com.example.model.AuthSessionMode.BLUETOOTH_ONLY, store.getAuthSessionMode())
+
+        store.setAuthSessionMode(com.example.model.AuthSessionMode.GUEST_LOCAL)
+        assertEquals(com.example.model.AuthSessionMode.GUEST_LOCAL, store.getAuthSessionMode())
+
+        val customActive = listOf(com.example.model.QuickToolId.DPAD, com.example.model.QuickToolId.ENTER)
+        val customPool = listOf(com.example.model.QuickToolId.SPACE, com.example.model.QuickToolId.TR_CCEDIL)
+        store.saveSettings(
+            RemoteSettings(
+                quickToolsActiveOrder = customActive,
+                quickToolsPoolOrder = customPool,
+                liveTypingMode = false
+            )
+        )
+        val reloaded = store.loadSettings()
+        assertEquals(customActive, reloaded.quickToolsActiveOrder)
+        assertTrue(reloaded.quickToolsPoolOrder.containsAll(customPool))
+        assertFalse(reloaded.liveTypingMode)
+    }
 }
+

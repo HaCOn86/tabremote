@@ -22,6 +22,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.core.graphics.toColorInt
 import com.example.bluetooth.HidConstants
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -379,7 +380,7 @@ class RemoteAccessibilityService : AccessibilityService() {
         private var isHolding = false
 
         private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FF2A4D")
+            color = "#FF2A4D".toColorInt()
             style = Paint.Style.FILL
         }
         private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -389,7 +390,7 @@ class RemoteAccessibilityService : AccessibilityService() {
             strokeJoin = Paint.Join.ROUND
         }
         private val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FF4D6D")
+            color = "#FF4D6D".toColorInt()
             style = Paint.Style.STROKE
             strokeWidth = 2.2f * density
         }

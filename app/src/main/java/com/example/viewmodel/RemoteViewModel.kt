@@ -19,12 +19,14 @@ import com.example.data.PairedDevice
 import com.example.data.SettingsPrefsStore
 import com.example.model.ActiveTransport
 import com.example.model.AppRole
+import com.example.model.AuthSessionMode
 import com.example.model.ConnectionStatus
 import com.example.model.HidProfileMode
 import com.example.model.InputSubMode
 import com.example.model.MediaDockItemId
 import com.example.model.MouseButton
 import com.example.model.NavDockItemId
+import com.example.model.QuickToolId
 import com.example.model.RemoteSettings
 import com.example.model.VolumeAction
 import com.example.network.WifiNetworkUtils
@@ -40,6 +42,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -50,7 +53,8 @@ import kotlin.math.roundToInt
 class RemoteViewModel(
     private val appContext: Context,
     private val deviceSyncRepository: DeviceSyncRepository,
-    val currentUserId: String
+    val currentUserId: String?,
+    val authSessionMode: AuthSessionMode = if (currentUserId != null) AuthSessionMode.GOOGLE else AuthSessionMode.BLUETOOTH_ONLY
 ) : ViewModel() {
 
     private val prefsStore = SettingsPrefsStore(appContext)
@@ -98,9 +102,12 @@ class RemoteViewModel(
     val accessibilityEnabled: StateFlow<Boolean> = _accessibilityEnabled.asStateFlow()
 
     val cloudDevices: StateFlow<List<PairedDevice>> =
-        deviceSyncRepository.observeUserDevices(currentUserId)
-            .catch { emit(emptyList()) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        (if (currentUserId != null) {
+            deviceSyncRepository.observeUserDevices(currentUserId)
+                .catch { emit(emptyList()) }
+        } else {
+            flowOf(emptyList())
+        }).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeConnectionStatus: StateFlow<ConnectionStatus> = combine(
         hidController.connectionStatus,
@@ -131,7 +138,9 @@ class RemoteViewModel(
     val isGyroSupported: Boolean = airMouseSensorManager.isSupported
 
     private var scrollAccumulator = 0f
+    private var twoFingerScrollAccumulator = 0f
     private var horizontalPanAccumulator = 0f
+    private var classicPinchAccumulator = 0f
 
     init {
         val initial = _settings.value
@@ -223,10 +232,11 @@ class RemoteViewModel(
             RemoteAccessibilityService.isAccessibilitySettingEnabled(appContext)
         _accessibilityEnabled.value = accessReady
 
+        val uid = currentUserId ?: return
         viewModelScope.launch {
             try {
                 deviceSyncRepository.upsertDevice(
-                    userId = currentUserId,
+                    userId = uid,
                     deviceId = localDeviceId,
                     deviceName = current.localDeviceName.ifBlank { Build.MODEL ?: "TabRemote Cihaz" },
                     role = if (current.appRole == AppRole.RECEIVER) {
@@ -439,6 +449,57 @@ class RemoteViewModel(
                 hidController.sendMouseWheel(-ticks)
             }
             triggerHapticTick()
+        }
+    }
+
+    /**
+     * Natural two-finger trackpad vertical scroll:
+     * Swiping two fingers UP (deltaY < 0) sends negative wheel ticks so the page moves DOWN.
+     */
+    fun onTwoFingerVerticalScroll(deltaY: Float) {
+        val s = _settings.value.scrollSensitivity
+        val direction = HidConstants.twoFingerScrollDirectionSign(_settings.value.invertScroll)
+
+        twoFingerScrollAccumulator += deltaY * s * direction * 0.08f
+        val ticks = twoFingerScrollAccumulator.toInt()
+
+        if (ticks != 0) {
+            twoFingerScrollAccumulator -= ticks
+            if (isWifiConnected) {
+                wifiClient.sendScroll(verticalTicks = ticks, horizontalTicks = 0)
+            } else {
+                hidController.sendMouseWheel(ticks)
+            }
+            triggerHapticTick()
+        }
+    }
+
+    /**
+     * Fallback pinch-to-zoom when Precision Touchpad multi-touch isn't used (e.g. Classic Mouse mode):
+     * emits Left Ctrl held + mouse scroll wheel (Ctrl + Scroll) so target hosts zoom smoothly.
+     */
+    fun onClassicPinchZoomStep(pinchDelta: Float) {
+        classicPinchAccumulator += pinchDelta
+        val threshold = 18f
+        if (classicPinchAccumulator.absoluteValue >= threshold) {
+            val tick = HidConstants.classicPinchZoomWheelTick(classicPinchAccumulator)
+            classicPinchAccumulator = 0f
+            if (tick != 0) {
+                if (isWifiConnected) {
+                    val key = if (tick > 0) HidConstants.KEY_EQUAL else HidConstants.KEY_MINUS
+                    wifiClient.sendKey(key, HidConstants.MOD_LCTRL)
+                } else {
+                    hidController.sendCtrlScrollZoomStep(tick)
+                }
+                triggerHapticTick()
+            }
+        }
+    }
+
+    fun onClassicPinchZoomEnd() {
+        classicPinchAccumulator = 0f
+        if (!isWifiConnected) {
+            hidController.releasePinchZoomModifiers()
         }
     }
 
@@ -764,10 +825,57 @@ class RemoteViewModel(
                 navDockOrder = defaults.navDockOrder,
                 hiddenNavDockItems = emptySet(),
                 mediaDockOrder = defaults.mediaDockOrder,
-                hiddenMediaDockItems = emptySet()
+                hiddenMediaDockItems = emptySet(),
+                quickToolsActiveOrder = defaults.quickToolsActiveOrder,
+                quickToolsPoolOrder = defaults.quickToolsPoolOrder
             )
         }
         triggerHapticClick()
+    }
+
+    fun moveQuickTool(fromIndex: Int, toIndex: Int) {
+        updateSettings { s ->
+            if (fromIndex == toIndex) return@updateSettings s
+            if (fromIndex !in s.quickToolsActiveOrder.indices || toIndex !in s.quickToolsActiveOrder.indices) {
+                return@updateSettings s
+            }
+            val mutable = s.quickToolsActiveOrder.toMutableList()
+            val moved = mutable.removeAt(fromIndex)
+            mutable.add(toIndex, moved)
+            s.copy(quickToolsActiveOrder = mutable)
+        }
+        triggerHapticTick()
+    }
+
+    fun removeQuickToolToPool(tool: QuickToolId) {
+        updateSettings { s ->
+            if (tool !in s.quickToolsActiveOrder) return@updateSettings s
+            val updatedActive = s.quickToolsActiveOrder.filterNot { it == tool }
+            val updatedPool = (s.quickToolsPoolOrder.filterNot { it == tool }) + tool
+            s.copy(
+                quickToolsActiveOrder = updatedActive,
+                quickToolsPoolOrder = updatedPool
+            )
+        }
+        triggerHapticTick()
+    }
+
+    fun addQuickToolFromPool(tool: QuickToolId) {
+        updateSettings { s ->
+            if (tool in s.quickToolsActiveOrder) return@updateSettings s
+            val updatedActive = s.quickToolsActiveOrder + tool
+            val updatedPool = s.quickToolsPoolOrder.filterNot { it == tool }
+            s.copy(
+                quickToolsActiveOrder = updatedActive,
+                quickToolsPoolOrder = updatedPool
+            )
+        }
+        triggerHapticTick()
+    }
+
+    fun setLiveTypingMode(enabled: Boolean) {
+        updateSettings { it.copy(liveTypingMode = enabled) }
+        triggerHapticTick()
     }
 
     fun updateSettings(transform: (RemoteSettings) -> RemoteSettings) {
@@ -785,9 +893,10 @@ class RemoteViewModel(
         wifiReceiverServer.stop()
         hidController.disconnectDevice()
         RemoteConnectionService.stop(appContext)
+        val uid = currentUserId ?: return
         viewModelScope.launch {
             try {
-                deviceSyncRepository.markOffline(currentUserId, localDeviceId)
+                deviceSyncRepository.markOffline(uid, localDeviceId)
             } catch (_: Exception) {
             }
         }
