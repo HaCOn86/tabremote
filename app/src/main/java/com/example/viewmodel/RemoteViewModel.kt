@@ -11,9 +11,9 @@ import android.view.KeyEvent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.accessibility.RemoteAccessibilityService
+import com.example.accessibility.RemoteMediaNotificationService
 import com.example.bluetooth.BluetoothHidController
 import com.example.bluetooth.HidConstants
-import com.example.bluetooth.TouchContact
 import com.example.data.DeviceSyncRepository
 import com.example.data.PairedDevice
 import com.example.data.SettingsPrefsStore
@@ -21,14 +21,22 @@ import com.example.model.ActiveTransport
 import com.example.model.AppRole
 import com.example.model.AuthSessionMode
 import com.example.model.ConnectionStatus
-import com.example.model.HidProfileMode
+import com.example.model.GamepadLayoutOffsets
 import com.example.model.InputSubMode
 import com.example.model.MediaDockItemId
 import com.example.model.MouseButton
 import com.example.model.NavDockItemId
 import com.example.model.QuickToolId
+import com.example.model.QuickToolPlacement
+import com.example.model.QuickToolsLayoutEngine
+import com.example.model.ReceiverTelemetry
 import com.example.model.RemoteSettings
+import com.example.model.SettingsSubPage
+import com.example.model.SparseCell
+import com.example.model.SparseGridEngine
 import com.example.model.VolumeAction
+import com.example.model.WifiQuickWidgetId
+import com.example.model.WifiWidgetPlacement
 import com.example.network.WifiNetworkUtils
 import com.example.network.WifiReceiverServer
 import com.example.network.WifiRemoteClient
@@ -76,10 +84,11 @@ class RemoteViewModel(
     private val _settings = MutableStateFlow(prefsStore.loadSettings())
     val settings: StateFlow<RemoteSettings> = _settings.asStateFlow()
 
-    private val _currentTab = MutableStateFlow(
-        if (_settings.value.unifiedControlMode) NavTab.CONTROL else NavTab.TOUCHPAD
-    )
+    private val _currentTab = MutableStateFlow(NavTab.TOUCHPAD)
     val currentTab: StateFlow<NavTab> = _currentTab.asStateFlow()
+
+    private val _pendingSettingsSubPage = MutableStateFlow<SettingsSubPage?>(null)
+    val pendingSettingsSubPage: StateFlow<SettingsSubPage?> = _pendingSettingsSubPage.asStateFlow()
 
     private val _unifiedAirMouseExpanded = MutableStateFlow(false)
     val unifiedAirMouseExpanded: StateFlow<Boolean> = _unifiedAirMouseExpanded.asStateFlow()
@@ -87,7 +96,7 @@ class RemoteViewModel(
     private val _airMouseActive = MutableStateFlow(false)
     val airMouseActive: StateFlow<Boolean> = _airMouseActive.asStateFlow()
 
-    private val _inputSubMode = MutableStateFlow(InputSubMode.SMART_KEYBOARD)
+    private val _inputSubMode = MutableStateFlow(InputSubMode.HUB_HOME)
     val inputSubMode: StateFlow<InputSubMode> = _inputSubMode.asStateFlow()
 
     private val _preferredTransport = MutableStateFlow(ActiveTransport.BLUETOOTH_HID)
@@ -100,6 +109,18 @@ class RemoteViewModel(
             RemoteAccessibilityService.isAccessibilitySettingEnabled(appContext)
     )
     val accessibilityEnabled: StateFlow<Boolean> = _accessibilityEnabled.asStateFlow()
+
+    private val _notificationListenerEnabled = MutableStateFlow(
+        RemoteMediaNotificationService.isNotificationListenerEnabled(appContext)
+    )
+    val notificationListenerEnabled: StateFlow<Boolean> = _notificationListenerEnabled.asStateFlow()
+
+    val receiverTelemetry: StateFlow<ReceiverTelemetry> = combine(
+        wifiClient.connectionStatus,
+        wifiClient.receiverTelemetry
+    ) { wifiStatus, remote ->
+        if (wifiStatus is ConnectionStatus.Connected) remote else ReceiverTelemetry()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReceiverTelemetry())
 
     val cloudDevices: StateFlow<List<PairedDevice>> =
         (if (currentUserId != null) {
@@ -141,14 +162,18 @@ class RemoteViewModel(
     private var twoFingerScrollAccumulator = 0f
     private var horizontalPanAccumulator = 0f
     private var classicPinchAccumulator = 0f
+    private var isWifiScrollActive = false
 
     init {
         val initial = _settings.value
-        hidController.initialize(
-            usePrecisionTouchpad = initial.hidProfileMode == HidProfileMode.PRECISION_TOUCHPAD,
-            sdpName = initial.customBluetoothName
-        )
+        hidController.initialize()
         syncSensorSettings()
+        RemoteAccessibilityService.updateCursorAppearance(
+            scale = initial.cursorScale,
+            colorArgb = initial.cursorColorArgb,
+            borderColorArgb = initial.cursorBorderColorArgb,
+            contrastMode = initial.cursorContrastMode
+        )
         applyRoleSideEffects(initial.appRole)
         observeAccessibilityAndForeground()
         startCloudPresenceHeartbeat()
@@ -160,6 +185,13 @@ class RemoteViewModel(
                 _accessibilityEnabled.value =
                     connected || RemoteAccessibilityService.isAccessibilitySettingEnabled(appContext)
                 syncLocalDeviceToCloud()
+            }
+        }
+
+        viewModelScope.launch {
+            RemoteMediaNotificationService.isListenerConnected.collect { connected ->
+                _notificationListenerEnabled.value =
+                    connected || RemoteMediaNotificationService.isNotificationListenerEnabled(appContext)
             }
         }
 
@@ -211,6 +243,8 @@ class RemoteViewModel(
                 _accessibilityEnabled.value =
                     RemoteAccessibilityService.isServiceConnected.value ||
                     RemoteAccessibilityService.isAccessibilitySettingEnabled(appContext)
+                _notificationListenerEnabled.value =
+                    RemoteMediaNotificationService.isNotificationListenerEnabled(appContext)
                 syncLocalDeviceToCloud()
             }
         }
@@ -221,6 +255,8 @@ class RemoteViewModel(
         _accessibilityEnabled.value =
             RemoteAccessibilityService.isServiceConnected.value ||
             RemoteAccessibilityService.isAccessibilitySettingEnabled(appContext)
+        _notificationListenerEnabled.value =
+            RemoteMediaNotificationService.isNotificationListenerEnabled(appContext)
         syncLocalDeviceToCloud()
     }
 
@@ -266,23 +302,10 @@ class RemoteViewModel(
     private fun applyRoleSideEffects(role: AppRole) {
         if (role == AppRole.RECEIVER) {
             wifiClient.disconnect()
-            wifiReceiverServer.start(WifiNetworkUtils.DEFAULT_PORT, sessionToken)
+            wifiReceiverServer.start(WifiNetworkUtils.DEFAULT_PORT, sessionToken, appContext)
         } else {
             wifiReceiverServer.stop()
         }
-    }
-
-    fun setUnifiedControlMode(enabled: Boolean) {
-        updateSettings { it.copy(unifiedControlMode = enabled) }
-        if (enabled && (_currentTab.value == NavTab.TOUCHPAD || _currentTab.value == NavTab.AIR_MOUSE)) {
-            _currentTab.value = NavTab.CONTROL
-            setAirMouseState(_unifiedAirMouseExpanded.value)
-        } else if (!enabled && _currentTab.value == NavTab.CONTROL) {
-            _unifiedAirMouseExpanded.value = false
-            _currentTab.value = NavTab.TOUCHPAD
-            setAirMouseState(false)
-        }
-        triggerHapticTick()
     }
 
     fun toggleUnifiedAirMouse() {
@@ -291,22 +314,34 @@ class RemoteViewModel(
 
     fun setUnifiedAirMouseExpanded(expanded: Boolean) {
         _unifiedAirMouseExpanded.value = expanded
-        if (_currentTab.value == NavTab.CONTROL) {
+        if (_currentTab.value == NavTab.TOUCHPAD) {
             setAirMouseState(expanded)
         }
     }
 
     fun selectTab(tab: NavTab) {
         _currentTab.value = tab
-        when (tab) {
-            NavTab.AIR_MOUSE -> setAirMouseState(true)
-            NavTab.CONTROL -> setAirMouseState(_unifiedAirMouseExpanded.value)
-            else -> setAirMouseState(false)
+        if (tab == NavTab.CONTROL_HUB && isWifiConnected) {
+            wifiClient.requestTelemetry()
         }
+        val shouldRunAir = tab == NavTab.TOUCHPAD && _unifiedAirMouseExpanded.value
+        setAirMouseState(shouldRunAir)
+    }
+
+    fun openSettingsSubPage(subPage: SettingsSubPage) {
+        _pendingSettingsSubPage.value = subPage
+        selectTab(NavTab.SETTINGS)
+    }
+
+    fun consumePendingSettingsSubPage() {
+        _pendingSettingsSubPage.value = null
     }
 
     fun selectInputSubMode(mode: InputSubMode) {
         _inputSubMode.value = mode
+        if (_currentTab.value == NavTab.CONTROL_HUB && mode == InputSubMode.HUB_HOME && isWifiConnected) {
+            wifiClient.requestTelemetry()
+        }
         triggerHapticTick()
     }
 
@@ -314,23 +349,14 @@ class RemoteViewModel(
     // Bluetooth HID & Wi-Fi Receiver Connections
     // ==========================================
 
-    fun setHidProfileMode(mode: HidProfileMode) {
-        if (_settings.value.hidProfileMode == mode) return
-        updateSettings { it.copy(hidProfileMode = mode) }
-        hidController.reregisterProfile(
-            usePrecisionTouchpad = mode == HidProfileMode.PRECISION_TOUCHPAD,
-            newSdpName = _settings.value.customBluetoothName
-        )
-        triggerHapticClick()
+    fun refreshBluetooth() {
+        hidController.initialize()
+        hidController.refreshBondedDevices()
     }
 
-    fun refreshBluetooth() {
-        val current = _settings.value
-        hidController.initialize(
-            usePrecisionTouchpad = current.hidProfileMode == HidProfileMode.PRECISION_TOUCHPAD,
-            sdpName = current.customBluetoothName
-        )
-        hidController.refreshBondedDevices()
+    fun unpairBluetoothDevice(device: BluetoothDevice) {
+        hidController.unpairDevice(device)
+        triggerHapticClick()
     }
 
     fun toggleBluetoothScan() {
@@ -344,14 +370,6 @@ class RemoteViewModel(
 
     fun createDiscoverableIntent(durationSeconds: Int = 120): Intent =
         hidController.createDiscoverableIntent(durationSeconds)
-
-    fun renameBluetoothDevice(newName: String) {
-        val clean = newName.trim().take(30)
-        if (clean.isBlank()) return
-        updateSettings { it.copy(customBluetoothName = clean) }
-        hidController.renameBluetoothDevice(clean)
-        triggerHapticClick()
-    }
 
     fun updateLocalCloudDeviceName(newName: String) {
         val clean = newName.trim().take(60)
@@ -404,14 +422,8 @@ class RemoteViewModel(
     }
 
     // ==========================================
-    // Touchpad Interactions (Wi-Fi Accessibility + BT Precision Touchpad + Classic)
+    // Touchpad Interactions (Continuous Wi-Fi + BT Classic)
     // ==========================================
-
-    fun sendTouchpadContacts(contacts: List<TouchContact>, clickpadPressed: Boolean = false) {
-        if (!isWifiConnected) {
-            hidController.sendTouchpadContacts(contacts, clickpadPressed)
-        }
-    }
 
     fun onTrackpadDrag(rawDx: Float, rawDy: Float) {
         val s = _settings.value.pointerSensitivity
@@ -437,60 +449,83 @@ class RemoteViewModel(
     fun onScrollGutterDrag(deltaY: Float) {
         val s = _settings.value.scrollSensitivity
         val direction = if (_settings.value.invertScroll) -1f else 1f
+        if (isWifiConnected) {
+            val phase = if (isWifiScrollActive) "MOVE" else "START"
+            isWifiScrollActive = true
+            wifiClient.sendContinuousScroll(phase, 0f, -deltaY * s * direction * 1.4f)
+            return
+        }
 
         scrollAccumulator += deltaY * s * direction * 0.08f
         val ticks = scrollAccumulator.toInt()
-
         if (ticks != 0) {
             scrollAccumulator -= ticks
-            if (isWifiConnected) {
-                wifiClient.sendScroll(verticalTicks = -ticks, horizontalTicks = 0)
-            } else {
-                hidController.sendMouseWheel(-ticks)
-            }
+            hidController.sendMouseWheel(-ticks)
             triggerHapticTick()
         }
     }
 
-    /**
-     * Natural two-finger trackpad vertical scroll:
-     * Swiping two fingers UP (deltaY < 0) sends negative wheel ticks so the page moves DOWN.
-     */
     fun onTwoFingerVerticalScroll(deltaY: Float) {
         val s = _settings.value.scrollSensitivity
         val direction = HidConstants.twoFingerScrollDirectionSign(_settings.value.invertScroll)
 
+        if (isWifiConnected) {
+            val phase = if (isWifiScrollActive) "MOVE" else "START"
+            isWifiScrollActive = true
+            wifiClient.sendContinuousScroll(phase, 0f, deltaY * s * direction * 1.6f)
+            return
+        }
+
         twoFingerScrollAccumulator += deltaY * s * direction * 0.08f
         val ticks = twoFingerScrollAccumulator.toInt()
-
         if (ticks != 0) {
             twoFingerScrollAccumulator -= ticks
-            if (isWifiConnected) {
-                wifiClient.sendScroll(verticalTicks = ticks, horizontalTicks = 0)
-            } else {
-                hidController.sendMouseWheel(ticks)
-            }
+            hidController.sendMouseWheel(ticks)
             triggerHapticTick()
         }
     }
 
-    /**
-     * Fallback pinch-to-zoom when Precision Touchpad multi-touch isn't used (e.g. Classic Mouse mode):
-     * emits Left Ctrl held + mouse scroll wheel (Ctrl + Scroll) so target hosts zoom smoothly.
-     */
+    fun onTouchpadTwoFingerHorizontalSwipe(deltaX: Float) {
+        val s = _settings.value.scrollSensitivity
+        if (isWifiConnected) {
+            val phase = if (isWifiScrollActive) "MOVE" else "START"
+            isWifiScrollActive = true
+            wifiClient.sendContinuousScroll(phase, deltaX * s * 1.5f, 0f)
+            return
+        }
+
+        horizontalPanAccumulator += deltaX * s
+        if (horizontalPanAccumulator < -36f) {
+            horizontalPanAccumulator = 0f
+            hidController.sendKeyboardKey(HidConstants.KEY_RIGHT, 0)
+            triggerHapticTick()
+        } else if (horizontalPanAccumulator > 36f) {
+            horizontalPanAccumulator = 0f
+            hidController.sendKeyboardKey(HidConstants.KEY_LEFT, 0)
+            triggerHapticTick()
+        }
+    }
+
+    fun onTwoFingerGestureEnd() {
+        if (isWifiConnected && isWifiScrollActive) {
+            isWifiScrollActive = false
+            wifiClient.sendContinuousScroll("END", 0f, 0f)
+        }
+    }
+
     fun onClassicPinchZoomStep(pinchDelta: Float) {
+        if (isWifiConnected) {
+            wifiClient.sendContinuousPinch("MOVE", pinchDelta * 1.15f)
+            return
+        }
+
         classicPinchAccumulator += pinchDelta
         val threshold = 18f
         if (classicPinchAccumulator.absoluteValue >= threshold) {
             val tick = HidConstants.classicPinchZoomWheelTick(classicPinchAccumulator)
             classicPinchAccumulator = 0f
             if (tick != 0) {
-                if (isWifiConnected) {
-                    val key = if (tick > 0) HidConstants.KEY_EQUAL else HidConstants.KEY_MINUS
-                    wifiClient.sendKey(key, HidConstants.MOD_LCTRL)
-                } else {
-                    hidController.sendCtrlScrollZoomStep(tick)
-                }
+                hidController.sendCtrlScrollZoomStep(tick)
                 triggerHapticTick()
             }
         }
@@ -498,51 +533,47 @@ class RemoteViewModel(
 
     fun onClassicPinchZoomEnd() {
         classicPinchAccumulator = 0f
-        if (!isWifiConnected) {
+        if (isWifiConnected) {
+            wifiClient.sendContinuousPinch("END", 0f)
+        } else {
             hidController.releasePinchZoomModifiers()
         }
     }
 
-    fun onTouchpadTwoFingerHorizontalSwipe(deltaX: Float) {
-        val s = _settings.value.scrollSensitivity
-        horizontalPanAccumulator += deltaX * s
-        if (horizontalPanAccumulator < -36f) {
-            horizontalPanAccumulator = 0f
-            if (isWifiConnected) {
-                wifiClient.sendScroll(0, -2)
-            } else {
-                hidController.sendKeyboardKey(HidConstants.KEY_RIGHT, 0)
-            }
-            triggerHapticTick()
-        } else if (horizontalPanAccumulator > 36f) {
-            horizontalPanAccumulator = 0f
-            if (isWifiConnected) {
-                wifiClient.sendScroll(0, 2)
-            } else {
-                hidController.sendKeyboardKey(HidConstants.KEY_LEFT, 0)
-            }
-            triggerHapticTick()
+    fun onTouchpadHoldStart() {
+        if (isWifiConnected) {
+            wifiClient.sendHoldTouch("START")
+        } else {
+            hidController.sendMouseButtonDown(MouseButton.LEFT)
+        }
+        triggerHapticClick()
+    }
+
+    fun onTouchpadHoldEnd() {
+        if (isWifiConnected) {
+            wifiClient.sendHoldTouch("END")
+        } else {
+            hidController.sendMouseButtonUp(MouseButton.LEFT)
         }
     }
 
     fun onHorizontalPan(deltaX: Float) {
         val s = _settings.value.scrollSensitivity
+        if (isWifiConnected) {
+            val phase = if (isWifiScrollActive) "MOVE" else "START"
+            isWifiScrollActive = true
+            wifiClient.sendContinuousScroll(phase, -deltaX * s * 1.4f, 0f)
+            return
+        }
+
         horizontalPanAccumulator += deltaX * s
         if (horizontalPanAccumulator > 32f) {
             horizontalPanAccumulator = 0f
-            if (isWifiConnected) {
-                wifiClient.sendScroll(0, -2)
-            } else {
-                hidController.sendKeyboardKey(HidConstants.KEY_RIGHT, 0)
-            }
+            hidController.sendKeyboardKey(HidConstants.KEY_RIGHT, 0)
             triggerHapticTick()
         } else if (horizontalPanAccumulator < -32f) {
             horizontalPanAccumulator = 0f
-            if (isWifiConnected) {
-                wifiClient.sendScroll(0, 2)
-            } else {
-                hidController.sendKeyboardKey(HidConstants.KEY_LEFT, 0)
-            }
+            hidController.sendKeyboardKey(HidConstants.KEY_LEFT, 0)
             triggerHapticTick()
         }
     }
@@ -600,42 +631,13 @@ class RemoteViewModel(
     }
 
     // ==========================================
-    // Tablet System Navigation Controls
+    // Tablet System Navigation & Wi-Fi Kontrol
     // ==========================================
 
     fun openRecentApps() {
         triggerHapticClick()
         if (isWifiConnected) {
             wifiClient.sendNav("RECENTS")
-            return
-        }
-        if (_settings.value.hidProfileMode == HidProfileMode.PRECISION_TOUCHPAD) {
-            viewModelScope.launch {
-                val steps = 12
-                val startY = 1700
-                val endY = 380
-                for (i in 0..steps) {
-                    val y = startY + ((endY - startY) * i / steps)
-                    hidController.sendTouchpadContacts(
-                        listOf(
-                            TouchContact(0, true, 1000, y),
-                            TouchContact(1, true, 1600, y),
-                            TouchContact(2, true, 2200, y)
-                        )
-                    )
-                    delay(12)
-                }
-                delay(45)
-                hidController.sendTouchpadContacts(
-                    listOf(
-                        TouchContact(0, false, 1000, endY),
-                        TouchContact(1, false, 1600, endY),
-                        TouchContact(2, false, 2200, endY)
-                    )
-                )
-                delay(15)
-                hidController.sendTouchpadContacts(emptyList())
-            }
         } else {
             hidController.sendConsumerKey(HidConstants.CONSUMER_AL_TASK_MANAGER)
         }
@@ -657,6 +659,100 @@ class RemoteViewModel(
             hidController.sendConsumerKey(HidConstants.CONSUMER_BACK)
         }
         triggerHapticClick()
+    }
+
+    private var lastBtVolumePercent = 50
+
+    fun setReceiverVolumePercent(percent: Int) {
+        val clamped = percent.coerceIn(0, 100)
+        if (isWifiConnected) {
+            wifiClient.sendSetVolume(clamped)
+            return
+        }
+        val btConnected = hidController.connectedDevice.value != null
+        if (btConnected) {
+            val diff = clamped - lastBtVolumePercent
+            lastBtVolumePercent = clamped
+            val step = if (diff >= 0) HidConstants.CONSUMER_VOLUME_UP else HidConstants.CONSUMER_VOLUME_DOWN
+            hidController.sendConsumerKey(step)
+        }
+    }
+
+    fun sendMediaPlayerAction(action: String) {
+        if (isWifiConnected) {
+            triggerHapticClick()
+            wifiClient.sendMediaAction(action)
+            wifiClient.requestTelemetry()
+            return
+        }
+        val btConnected = hidController.connectedDevice.value != null
+        if (btConnected) {
+            triggerHapticClick()
+            val usage = when (action) {
+                "PREV" -> HidConstants.CONSUMER_PREV_TRACK
+                "NEXT" -> HidConstants.CONSUMER_NEXT_TRACK
+                else -> HidConstants.CONSUMER_PLAY_PAUSE
+            }
+            hidController.sendConsumerKey(usage)
+        }
+    }
+
+    fun sendWifiQuickWidget(widget: WifiQuickWidgetId) {
+        triggerHapticClick()
+        when (widget) {
+            WifiQuickWidgetId.PLAY_PAUSE -> {
+                if (isWifiConnected) wifiClient.sendMediaAction("PLAY_PAUSE")
+                else hidController.sendConsumerKey(HidConstants.CONSUMER_PLAY_PAUSE)
+            }
+            WifiQuickWidgetId.PREV -> {
+                if (isWifiConnected) wifiClient.sendMediaAction("PREV")
+                else hidController.sendConsumerKey(HidConstants.CONSUMER_PREV_TRACK)
+            }
+            WifiQuickWidgetId.NEXT -> {
+                if (isWifiConnected) wifiClient.sendMediaAction("NEXT")
+                else hidController.sendConsumerKey(HidConstants.CONSUMER_NEXT_TRACK)
+            }
+            WifiQuickWidgetId.MUTE -> sendConsumerKey(HidConstants.CONSUMER_MUTE, "Mute")
+            WifiQuickWidgetId.VOL_DOWN -> sendConsumerKey(HidConstants.CONSUMER_VOLUME_DOWN, "Vol Down")
+            WifiQuickWidgetId.VOL_UP -> sendConsumerKey(HidConstants.CONSUMER_VOLUME_UP, "Vol Up")
+            WifiQuickWidgetId.BACK -> navigateBack()
+            WifiQuickWidgetId.HOME -> navigateHome()
+            WifiQuickWidgetId.RECENTS -> openRecentApps()
+            WifiQuickWidgetId.NOTIFICATIONS -> if (isWifiConnected) wifiClient.sendSystemPanel("NOTIFICATIONS")
+            WifiQuickWidgetId.QUICK_SETTINGS -> if (isWifiConnected) wifiClient.sendSystemPanel("QUICK_SETTINGS")
+            WifiQuickWidgetId.SCREENSHOT -> if (isWifiConnected) wifiClient.sendSystemPanel("SCREENSHOT")
+            WifiQuickWidgetId.LOCK_SCREEN -> if (isWifiConnected) wifiClient.sendSystemPanel("LOCK_SCREEN")
+            WifiQuickWidgetId.ZOOM_IN -> {
+                if (isWifiConnected) {
+                    wifiClient.sendContinuousPinch("START", 48f)
+                    viewModelScope.launch {
+                        delay(70L)
+                        wifiClient.sendContinuousPinch("END", 0f)
+                    }
+                } else {
+                    hidController.sendKeyboardKey(HidConstants.KEY_EQUAL, HidConstants.MOD_LCTRL)
+                }
+            }
+            WifiQuickWidgetId.ZOOM_OUT -> {
+                if (isWifiConnected) {
+                    wifiClient.sendContinuousPinch("START", -48f)
+                    viewModelScope.launch {
+                        delay(70L)
+                        wifiClient.sendContinuousPinch("END", 0f)
+                    }
+                } else {
+                    hidController.sendKeyboardKey(HidConstants.KEY_MINUS, HidConstants.MOD_LCTRL)
+                }
+            }
+            WifiQuickWidgetId.REFRESH -> sendKey(HidConstants.KEY_R, HidConstants.MOD_LCTRL)
+            WifiQuickWidgetId.NEW_TAB -> sendKey(HidConstants.KEY_T, HidConstants.MOD_LCTRL)
+            WifiQuickWidgetId.CLOSE_TAB -> sendKey(HidConstants.KEY_W, HidConstants.MOD_LCTRL)
+            WifiQuickWidgetId.ADDRESS_BAR -> sendKey(HidConstants.KEY_L, HidConstants.MOD_LCTRL)
+            WifiQuickWidgetId.FULLSCREEN -> sendKey(HidConstants.KEY_F11, 0)
+        }
+        if (isWifiConnected) {
+            wifiClient.requestTelemetry()
+        }
     }
 
     // ==========================================
@@ -719,7 +815,9 @@ class RemoteViewModel(
         rx: Int,
         ry: Int
     ) {
-        hidController.sendGamepadReport(buttonsMask, hat, lx, ly, rx, ry)
+        if (isWifiConnected) {
+            wifiClient.sendGamepadState(buttonsMask, hat, lx, ly, rx, ry)
+        }
     }
 
     // ==========================================
@@ -762,16 +860,25 @@ class RemoteViewModel(
     }
 
     // ==========================================
-    // Dock Customization & Settings Persistence
+    // Dock Customization & 2D Sparse Grids
     // ==========================================
 
     fun moveNavDockItem(index: Int, delta: Int) {
+        val target = index + delta
+        moveNavDockItemTo(index, target)
+    }
+
+    fun moveNavDockItemTo(fromIndex: Int, toIndex: Int) {
         updateSettings { s ->
-            val target = index + delta
-            if (index !in s.navDockOrder.indices || target !in s.navDockOrder.indices) return@updateSettings s
+            if (fromIndex == toIndex ||
+                fromIndex !in s.navDockOrder.indices ||
+                toIndex !in s.navDockOrder.indices
+            ) {
+                return@updateSettings s
+            }
             val mutable = s.navDockOrder.toMutableList()
-            val moved = mutable.removeAt(index)
-            mutable.add(target, moved)
+            val moved = mutable.removeAt(fromIndex)
+            mutable.add(toIndex, moved)
             s.copy(navDockOrder = mutable)
         }
         triggerHapticTick()
@@ -783,7 +890,6 @@ class RemoteViewModel(
             if (item in updated) {
                 updated.remove(item)
             } else {
-                // Keep at least HOME / BACK available
                 val remainingCount = s.navDockOrder.count { it !in updated && it != item }
                 if (remainingCount >= 1) updated.add(item)
             }
@@ -827,7 +933,57 @@ class RemoteViewModel(
                 mediaDockOrder = defaults.mediaDockOrder,
                 hiddenMediaDockItems = emptySet(),
                 quickToolsActiveOrder = defaults.quickToolsActiveOrder,
-                quickToolsPoolOrder = defaults.quickToolsPoolOrder
+                quickToolsPoolOrder = defaults.quickToolsPoolOrder,
+                quickToolsPlacements = defaults.quickToolsPlacements,
+                wifiControlPlacements = defaults.wifiControlPlacements
+            )
+        }
+        triggerHapticClick()
+    }
+
+    fun placeQuickToolAt(tool: QuickToolId, targetCol: Int, targetRow: Int) {
+        updateSettings { s ->
+            val existing = s.quickToolsPlacements.firstOrNull { it.tool == tool }
+            val spanCol = existing?.colSpan ?: tool.colSpan
+            val spanRow = existing?.rowSpan ?: tool.rowSpan
+            val updatedCells = SparseGridEngine.placeWithPush(
+                cells = QuickToolsLayoutEngine.toSparseCells(s.quickToolsPlacements),
+                targetId = tool,
+                targetCol = targetCol,
+                targetRow = targetRow,
+                targetColSpan = spanCol,
+                targetRowSpan = spanRow
+            )
+            val updatedPlacements = QuickToolsLayoutEngine.fromSparseCells(updatedCells)
+            val updatedActive = updatedPlacements.map { it.tool }
+            val updatedPool = (s.quickToolsPoolOrder.filterNot { it in updatedActive } +
+                QuickToolId.entries.filter { it !in updatedActive && it !in s.quickToolsPoolOrder }).distinct()
+            s.copy(
+                quickToolsPlacements = updatedPlacements,
+                quickToolsActiveOrder = updatedActive,
+                quickToolsPoolOrder = updatedPool
+            )
+        }
+        triggerHapticTick()
+    }
+
+    fun resizeQuickTool(tool: QuickToolId) {
+        updateSettings { s ->
+            val cur = s.quickToolsPlacements.firstOrNull { it.tool == tool } ?: return@updateSettings s
+            val (nextColSpan, nextRowSpan) = tool.nextSpan(cur.colSpan, cur.rowSpan)
+            if (nextColSpan == cur.colSpan && nextRowSpan == cur.rowSpan) return@updateSettings s
+            val updatedCells = SparseGridEngine.placeWithPush(
+                cells = QuickToolsLayoutEngine.toSparseCells(s.quickToolsPlacements),
+                targetId = tool,
+                targetCol = cur.col,
+                targetRow = cur.row,
+                targetColSpan = nextColSpan,
+                targetRowSpan = nextRowSpan
+            )
+            val updatedPlacements = QuickToolsLayoutEngine.fromSparseCells(updatedCells)
+            s.copy(
+                quickToolsPlacements = updatedPlacements,
+                quickToolsActiveOrder = updatedPlacements.map { it.tool }
             )
         }
         triggerHapticClick()
@@ -836,23 +992,34 @@ class RemoteViewModel(
     fun moveQuickTool(fromIndex: Int, toIndex: Int) {
         updateSettings { s ->
             if (fromIndex == toIndex) return@updateSettings s
-            if (fromIndex !in s.quickToolsActiveOrder.indices || toIndex !in s.quickToolsActiveOrder.indices) {
-                return@updateSettings s
-            }
-            val mutable = s.quickToolsActiveOrder.toMutableList()
-            val moved = mutable.removeAt(fromIndex)
-            mutable.add(toIndex, moved)
-            s.copy(quickToolsActiveOrder = mutable)
+            val placements = s.quickToolsPlacements
+            if (fromIndex !in placements.indices || toIndex !in placements.indices) return@updateSettings s
+            val moving = placements[fromIndex]
+            val dest = placements[toIndex]
+            val updatedCells = SparseGridEngine.placeWithPush(
+                cells = QuickToolsLayoutEngine.toSparseCells(placements),
+                targetId = moving.tool,
+                targetCol = dest.col,
+                targetRow = dest.row,
+                targetColSpan = moving.colSpan,
+                targetRowSpan = moving.rowSpan
+            )
+            val updatedPlacements = QuickToolsLayoutEngine.fromSparseCells(updatedCells)
+            s.copy(
+                quickToolsPlacements = updatedPlacements,
+                quickToolsActiveOrder = updatedPlacements.map { it.tool }
+            )
         }
         triggerHapticTick()
     }
 
     fun removeQuickToolToPool(tool: QuickToolId) {
         updateSettings { s ->
-            if (tool !in s.quickToolsActiveOrder) return@updateSettings s
-            val updatedActive = s.quickToolsActiveOrder.filterNot { it == tool }
+            val updatedPlacements = s.quickToolsPlacements.filterNot { it.tool == tool }
+            val updatedActive = updatedPlacements.map { it.tool }
             val updatedPool = (s.quickToolsPoolOrder.filterNot { it == tool }) + tool
             s.copy(
+                quickToolsPlacements = updatedPlacements,
                 quickToolsActiveOrder = updatedActive,
                 quickToolsPoolOrder = updatedPool
             )
@@ -862,13 +1029,76 @@ class RemoteViewModel(
 
     fun addQuickToolFromPool(tool: QuickToolId) {
         updateSettings { s ->
-            if (tool in s.quickToolsActiveOrder) return@updateSettings s
-            val updatedActive = s.quickToolsActiveOrder + tool
+            if (s.quickToolsPlacements.any { it.tool == tool }) return@updateSettings s
+            val updatedCells = SparseGridEngine.addAtFirstOpenSlot(
+                cells = QuickToolsLayoutEngine.toSparseCells(s.quickToolsPlacements),
+                id = tool,
+                colSpan = tool.colSpan,
+                rowSpan = tool.rowSpan
+            )
+            val updatedPlacements = QuickToolsLayoutEngine.fromSparseCells(updatedCells)
+            val updatedActive = updatedPlacements.map { it.tool }
             val updatedPool = s.quickToolsPoolOrder.filterNot { it == tool }
             s.copy(
+                quickToolsPlacements = updatedPlacements,
                 quickToolsActiveOrder = updatedActive,
                 quickToolsPoolOrder = updatedPool
             )
+        }
+        triggerHapticTick()
+    }
+
+    // Wi-Fi Kontrol 2D Sparse Grid mutations
+    fun placeWifiWidgetAt(widget: WifiQuickWidgetId, targetCol: Int, targetRow: Int) {
+        updateSettings { s ->
+            val existing = s.wifiControlPlacements.firstOrNull { it.widget == widget }
+            val updated = SparseGridEngine.placeWithPush(
+                cells = s.wifiControlPlacements.map { SparseCell(it.widget, it.col, it.row, it.colSpan, it.rowSpan) },
+                targetId = widget,
+                targetCol = targetCol,
+                targetRow = targetRow,
+                targetColSpan = existing?.colSpan ?: widget.defaultColSpan,
+                targetRowSpan = existing?.rowSpan ?: widget.defaultRowSpan
+            ).map { WifiWidgetPlacement(it.id, it.col, it.row, it.colSpan, it.rowSpan) }
+            s.copy(wifiControlPlacements = updated)
+        }
+        triggerHapticTick()
+    }
+
+    fun resizeWifiWidget(widget: WifiQuickWidgetId) {
+        updateSettings { s ->
+            val cur = s.wifiControlPlacements.firstOrNull { it.widget == widget } ?: return@updateSettings s
+            val (nextColSpan, nextRowSpan) = widget.nextSpan(cur.colSpan, cur.rowSpan)
+            val updated = SparseGridEngine.placeWithPush(
+                cells = s.wifiControlPlacements.map { SparseCell(it.widget, it.col, it.row, it.colSpan, it.rowSpan) },
+                targetId = widget,
+                targetCol = cur.col,
+                targetRow = cur.row,
+                targetColSpan = nextColSpan,
+                targetRowSpan = nextRowSpan
+            ).map { WifiWidgetPlacement(it.id, it.col, it.row, it.colSpan, it.rowSpan) }
+            s.copy(wifiControlPlacements = updated)
+        }
+        triggerHapticClick()
+    }
+
+    fun removeWifiWidget(widget: WifiQuickWidgetId) {
+        updateSettings { s ->
+            s.copy(wifiControlPlacements = s.wifiControlPlacements.filterNot { it.widget == widget })
+        }
+        triggerHapticTick()
+    }
+
+    fun addWifiWidget(widget: WifiQuickWidgetId) {
+        updateSettings { s ->
+            if (s.wifiControlPlacements.any { it.widget == widget }) return@updateSettings s
+            val updated = SparseGridEngine.addAtFirstOpenSlot(
+                cells = s.wifiControlPlacements.map { SparseCell(it.widget, it.col, it.row, it.colSpan, it.rowSpan) },
+                id = widget,
+                colSpan = widget.defaultColSpan,
+                rowSpan = widget.defaultRowSpan
+            ).map { WifiWidgetPlacement(it.id, it.col, it.row, it.colSpan, it.rowSpan) }
+            s.copy(wifiControlPlacements = updated)
         }
         triggerHapticTick()
     }
@@ -878,11 +1108,33 @@ class RemoteViewModel(
         triggerHapticTick()
     }
 
+    fun updateGamepadOffsets(transform: (GamepadLayoutOffsets) -> GamepadLayoutOffsets) {
+        updateSettings { s -> s.copy(gamepadOffsets = transform(s.gamepadOffsets)) }
+    }
+
+    fun resetGamepadOffsets() {
+        updateSettings { s ->
+            s.copy(
+                gamepadOffsets = GamepadLayoutOffsets(),
+                swapGamepadLeftWing = false,
+                swapGamepadRightWing = false,
+                mirrorGamepadHands = false
+            )
+        }
+        triggerHapticClick()
+    }
+
     fun updateSettings(transform: (RemoteSettings) -> RemoteSettings) {
         _settings.update { prev ->
             val updated = transform(prev)
             prefsStore.saveSettings(updated)
             syncSensorSettings()
+            RemoteAccessibilityService.updateCursorAppearance(
+                scale = updated.cursorScale,
+                colorArgb = updated.cursorColorArgb,
+                borderColorArgb = updated.cursorBorderColorArgb,
+                contrastMode = updated.cursorContrastMode
+            )
             updated
         }
     }
@@ -937,9 +1189,8 @@ class RemoteViewModel(
 }
 
 enum class NavTab(val title: String) {
-    CONTROL("Kontrol"),
     TOUCHPAD("Touchpad"),
-    AIR_MOUSE("Air Mouse"),
-    INPUTS("Girişler"),
+    KEYBOARD("Klavye"),
+    CONTROL_HUB("Kontrol Hub"),
     SETTINGS("Ayarlar")
 }

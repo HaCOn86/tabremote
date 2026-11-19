@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
@@ -8,16 +7,12 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -31,7 +26,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,89 +33,100 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardBackspace
 import androidx.compose.material.icons.automirrored.filled.KeyboardReturn
-import androidx.compose.material.icons.automirrored.filled.VolumeDown
-import androidx.compose.material.icons.automirrored.filled.VolumeMute
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SpaceBar
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.bluetooth.HidConstants
-import com.example.model.PlacedQuickTool
 import com.example.model.QuickToolId
-import com.example.model.QuickToolsLayoutEngine
-import com.example.ui.theme.GreenSuccess
-import com.example.ui.theme.RubyAccent
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.SurfaceContainerCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.model.QuickToolPlacement
+import com.example.model.SparseGridEngine
+import com.example.ui.theme.TabRemoteTheme
 import kotlin.math.roundToInt
 
 /**
- * Samsung One UI-style 6-column flexible Quick Tools grid & upper spare pool.
- * - Long-press any tile to activate edit mode (shows eye/remove badge on tiles & enables drag-and-drop reordering).
- * - Removing a tile sends it to the upper Spare Pool; tapping any pool item inserts it back into the grid.
+ * One UI 9 style 6-column coordinate-preserving 2D Quick Tools grid:
+ * - Preserves intentional empty gaps between buttons.
+ * - Entered ONLY via the "Düzenle" button next to "HIZLI ARAÇLAR" (no long-press hijack).
+ * - Smooth zero-lag drag-and-drop with ghost target footprint & nearest-open-cell push on drop.
+ * - Per-tile resize toggle (1x1 icon-only <-> 2x1 icon + title + shortcutHint; SPACE 2x1 <-> 3x1).
  */
 @Composable
 fun QuickToolsGridSection(
-    activeTools: List<QuickToolId>,
-    poolTools: List<QuickToolId>,
+    placements: List<QuickToolPlacement>,
     liveTypingMode: Boolean,
     isTurkishLayout: Boolean,
-    onMoveQuickTool: (fromIndex: Int, toIndex: Int) -> Unit,
+    isEditMode: Boolean,
+    onEditModeChange: (Boolean) -> Unit,
+    onPlaceQuickToolAt: (tool: QuickToolId, targetCol: Int, targetRow: Int) -> Unit,
+    onResizeQuickTool: (QuickToolId) -> Unit,
     onRemoveToPool: (QuickToolId) -> Unit,
-    onAddFromPool: (QuickToolId) -> Unit,
     onTriggerTool: (QuickToolId) -> Unit,
     onSendKey: (hidKeyCode: Int, modifier: Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    headerEndPadding: Dp = 0.dp
 ) {
-    var isEditMode by remember { mutableStateOf(false) }
-    var poolExpanded by remember { mutableStateOf(false) }
-    var draggedTool by remember { mutableStateOf<QuickToolId?>(null) }
+    val palette = TabRemoteTheme.palette
+    var draggedPlacement by remember { mutableStateOf<QuickToolPlacement?>(null) }
     var dragDelta by remember { mutableStateOf(Offset.Zero) }
+    var ghostCol by remember { mutableIntStateOf(0) }
+    var ghostRow by remember { mutableIntStateOf(0) }
 
-    val (placedTools, totalRows) = remember(activeTools) {
-        QuickToolsLayoutEngine.pack(activeTools, QuickToolsLayoutEngine.GRID_COLUMNS)
+    val baseRows = remember(placements) {
+        (placements.maxOfOrNull { it.row + it.rowSpan } ?: 1).coerceAtLeast(1)
     }
+    val totalRows = if (isEditMode) {
+        maxOf(baseRows + 1, ghostRow + (draggedPlacement?.rowSpan ?: 1))
+    } else {
+        baseRows
+    }
+
+    val latestOnPlaceAt by rememberUpdatedState(onPlaceQuickToolAt)
 
     Column(
         modifier = modifier
@@ -129,11 +134,10 @@ fun QuickToolsGridSection(
             .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
         verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        // Minimal Quick Tools Header & Pool Chip (no distracting side pencil icon)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 2.dp),
+                .padding(start = 2.dp, end = headerEndPadding + 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -142,159 +146,86 @@ fun QuickToolsGridSection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = if (isEditMode) "SÜRÜKLE & DÜZENLE" else "HIZLI ARAÇLAR",
-                    color = if (isEditMode) RubyPrimary else TextMuted,
+                    text = if (isEditMode) "SÜRÜKLE • ÇİFT TIKLA BOYUTLANDIR" else "KLAVYE KISAYOLLARI",
+                    color = if (isEditMode) palette.primary else palette.textMuted,
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp
+                    letterSpacing = 0.7.sp
                 )
-                Surface(
-                    color = if (poolExpanded || isEditMode) RubyPrimary.copy(alpha = 0.16f) else SurfaceCharcoal,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .border(
-                            1.dp,
-                            if (poolExpanded || isEditMode) RubyPrimary.copy(alpha = 0.55f) else SurfaceBorderRuby,
-                            RoundedCornerShape(10.dp)
-                        )
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { poolExpanded = !poolExpanded }
-                        .testTag("quick_tools_pool_toggle")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Visibility,
-                            contentDescription = "Havuz",
-                            tint = RubyPrimary,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Text(
-                            text = "Havuz (${poolTools.size})",
-                            color = RubyPrimary,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (isEditMode) {
-                    Surface(
-                        color = GreenSuccess.copy(alpha = 0.18f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .border(1.dp, GreenSuccess.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                isEditMode = false
-                                draggedTool = null
-                                dragDelta = Offset.Zero
-                            }
-                            .testTag("quick_tools_done_edit_btn")
-                    ) {
-                        Text(
-                            text = "BİTTİ",
-                            color = GreenSuccess,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
-                        )
-                    }
-                } else {
+                if (!isEditMode) {
                     Text(
-                        text = if (isTurkishLayout) "TR-Q • Basılı Tut: Düzenle" else "US-EN • Basılı Tut: Düzenle",
-                        color = TextMuted,
+                        text = if (isTurkishLayout) "• TR-Q" else "• US-EN",
+                        color = palette.textMuted,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
             }
-        }
 
-        // Upper Spare Pool (Yedek Havuz): Visible when expanded OR during Edit Mode
-        AnimatedVisibility(
-            visible = poolExpanded || isEditMode,
-            enter = expandVertically(tween(200)) + fadeIn(tween(150)),
-            exit = shrinkVertically(tween(180)) + fadeOut(tween(120))
-        ) {
-            Surface(
-                color = SurfaceCharcoal,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, RubyPrimary.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-                    .testTag("quick_tools_pool_bar")
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Text(
-                        text = if (poolTools.isEmpty()) {
-                            "Tüm araçlar ızgarada. Kaldırmak için herhangi bir tuşa basılı tutup göz simgesine dokunun."
-                        } else {
-                            "YEDEK HAVUZ (Eklemek için dokunun)"
-                        },
-                        color = TextSecondary,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    if (poolTools.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            poolTools.forEach { tool ->
-                                Surface(
-                                    color = SurfaceContainerCharcoal,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier
-                                        .height(32.dp)
-                                        .border(1.dp, RubyPrimary.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { onAddFromPool(tool) }
-                                        .testTag("pool_add_${tool.name.lowercase()}")
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 9.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Ekle",
-                                            tint = RubyPrimary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Text(
-                                            text = "${tool.shortLabel} (${tool.colSpan}x${tool.rowSpan})",
-                                            color = TextPrimary,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            softWrap = false
-                                        )
-                                    }
-                                }
-                            }
+            if (isEditMode) {
+                Surface(
+                    color = palette.primary,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            onEditModeChange(false)
+                            draggedPlacement = null
+                            dragDelta = Offset.Zero
                         }
+                        .testTag("quick_tools_done_edit_btn")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Düzenlemeyi Bitir",
+                            tint = palette.onAccent,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "Bitti",
+                            color = palette.onAccent,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    color = palette.surfaceContainer,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(1.dp, palette.borderElevated, RoundedCornerShape(10.dp))
+                        .clickable { onEditModeChange(true) }
+                        .testTag("quick_tools_edit_btn")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Hızlı Araçları Düzenle",
+                            tint = palette.textPrimary,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = "Düzenle",
+                            color = palette.textPrimary,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
         }
 
-        // 6-Column Flexible Quick Tools Grid Container
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
@@ -302,26 +233,15 @@ fun QuickToolsGridSection(
         ) {
             val density = LocalDensity.current
             val gapDp = 5.dp
-            val cellHeightDp = 38.dp
+            val cellHeightDp = 42.dp
             val gapPx = with(density) { gapDp.toPx() }
             val cellHeightPx = with(density) { cellHeightDp.toPx() }
             val totalWidthPx = with(density) { maxWidth.toPx() }
-            val cellWidthPx = ((totalWidthPx - gapPx * (QuickToolsLayoutEngine.GRID_COLUMNS - 1)) /
-                QuickToolsLayoutEngine.GRID_COLUMNS).coerceAtLeast(10f)
+            val cellWidthPx = ((totalWidthPx - gapPx * (SparseGridEngine.GRID_COLUMNS - 1)) /
+                SparseGridEngine.GRID_COLUMNS).coerceAtLeast(10f)
             val totalRowsEffective = totalRows.coerceAtLeast(1)
             val gridHeightDp = with(density) {
                 (totalRowsEffective * cellHeightPx + (totalRowsEffective - 1) * gapPx).toDp()
-            }
-
-            // Compute exact pixel rects for live drag-and-drop hit testing
-            val tileRects = remember(placedTools, cellWidthPx, cellHeightPx, gapPx) {
-                placedTools.associate { placed ->
-                    val x = placed.col * (cellWidthPx + gapPx)
-                    val y = placed.row * (cellHeightPx + gapPx)
-                    val w = placed.colSpan * cellWidthPx + (placed.colSpan - 1) * gapPx
-                    val h = placed.rowSpan * cellHeightPx + (placed.rowSpan - 1) * gapPx
-                    placed.tool to Rect(x, y, x + w, y + h)
-                }
             }
 
             Box(
@@ -329,9 +249,55 @@ fun QuickToolsGridSection(
                     .fillMaxWidth()
                     .height(gridHeightDp)
             ) {
-                placedTools.forEach { placed ->
+                // Sparse Grid Background Slots & Target Drop Footprint Highlight in Edit Mode
+                if (isEditMode) {
+                    val dashedStroke = remember {
+                        Stroke(
+                            width = 2.5f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))
+                        )
+                    }
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        for (r in 0 until totalRowsEffective) {
+                            for (c in 0 until SparseGridEngine.GRID_COLUMNS) {
+                                val x = c * (cellWidthPx + gapPx)
+                                val y = r * (cellHeightPx + gapPx)
+                                drawRoundRect(
+                                    color = palette.borderSubtle.copy(alpha = 0.55f),
+                                    topLeft = Offset(x, y),
+                                    size = Size(cellWidthPx, cellHeightPx),
+                                    cornerRadius = CornerRadius(14f, 14f),
+                                    style = Stroke(width = 1.5f)
+                                )
+                            }
+                        }
+
+                        val activeDrag = draggedPlacement
+                        if (activeDrag != null) {
+                            val gx = ghostCol * (cellWidthPx + gapPx)
+                            val gy = ghostRow * (cellHeightPx + gapPx)
+                            val gw = activeDrag.colSpan * cellWidthPx + (activeDrag.colSpan - 1) * gapPx
+                            val gh = activeDrag.rowSpan * cellHeightPx + (activeDrag.rowSpan - 1) * gapPx
+                            drawRoundRect(
+                                color = palette.primary.copy(alpha = 0.16f),
+                                topLeft = Offset(gx, gy),
+                                size = Size(gw, gh),
+                                cornerRadius = CornerRadius(18f, 18f)
+                            )
+                            drawRoundRect(
+                                color = palette.primary,
+                                topLeft = Offset(gx, gy),
+                                size = Size(gw, gh),
+                                cornerRadius = CornerRadius(18f, 18f),
+                                style = dashedStroke
+                            )
+                        }
+                    }
+                }
+
+                placements.forEach { placed ->
                     val tool = placed.tool
-                    val isBeingDragged = draggedTool == tool
+                    val isBeingDragged = draggedPlacement?.tool == tool
                     val baseX = placed.col * (cellWidthPx + gapPx)
                     val baseY = placed.row * (cellHeightPx + gapPx)
                     val wPx = placed.colSpan * cellWidthPx + (placed.colSpan - 1) * gapPx
@@ -339,12 +305,12 @@ fun QuickToolsGridSection(
 
                     val animX by animateDpAsState(
                         targetValue = with(density) { baseX.toDp() },
-                        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
+                        animationSpec = spring(dampingRatio = 0.88f, stiffness = Spring.StiffnessMediumLow),
                         label = "qt_x_${tool.name}"
                     )
                     val animY by animateDpAsState(
                         targetValue = with(density) { baseY.toDp() },
-                        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
+                        animationSpec = spring(dampingRatio = 0.88f, stiffness = Spring.StiffnessMediumLow),
                         label = "qt_y_${tool.name}"
                     )
                     val wDp = with(density) { wPx.toDp() }
@@ -367,46 +333,50 @@ fun QuickToolsGridSection(
                         Modifier.offset(x = animX, y = animY)
                     }
 
+                    val stepX = (cellWidthPx + gapPx).coerceAtLeast(1f)
+                    val stepY = (cellHeightPx + gapPx).coerceAtLeast(1f)
+                    val maxCol = (SparseGridEngine.GRID_COLUMNS - placed.colSpan).coerceAtLeast(0)
+                    val maxRow = (baseRows + 1).coerceAtLeast(1)
+
                     val tileInteractionModifier = if (isEditMode) {
-                        Modifier.pointerInput(tool, activeTools, tileRects) {
+                        Modifier.pointerInput(placed, maxCol, maxRow, stepX, stepY) {
                             detectDragGestures(
                                 onDragStart = {
-                                    draggedTool = tool
+                                    draggedPlacement = placed
                                     dragDelta = Offset.Zero
+                                    ghostCol = placed.col
+                                    ghostRow = placed.row
                                 },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
                                     dragDelta += dragAmount
-                                    val draggedRect = tileRects[tool] ?: return@detectDragGestures
-                                    val center = Offset(
-                                        draggedRect.center.x + dragDelta.x,
-                                        draggedRect.center.y + dragDelta.y
-                                    )
-                                    val hitEntry = tileRects.entries.firstOrNull { (otherTool, rect) ->
-                                        otherTool != tool && rect.contains(center)
-                                    }
-                                    if (hitEntry != null) {
-                                        val fromIdx = activeTools.indexOf(tool)
-                                        val toIdx = activeTools.indexOf(hitEntry.key)
-                                        if (fromIdx >= 0 && toIdx >= 0 && fromIdx != toIdx) {
-                                            val oldRect = tileRects[tool]
-                                            val newRect = tileRects[hitEntry.key]
-                                            if (oldRect != null && newRect != null) {
-                                                // Compensate dragDelta when underlying grid position jumps
-                                                dragDelta -= (newRect.topLeft - oldRect.topLeft)
-                                            }
-                                            onMoveQuickTool(fromIdx, toIdx)
-                                        }
-                                    }
+                                    val currLeft = baseX + dragDelta.x
+                                    val currTop = baseY + dragDelta.y
+                                    ghostCol = (currLeft / stepX).roundToInt().coerceIn(0, maxCol)
+                                    ghostRow = (currTop / stepY).roundToInt().coerceIn(0, maxRow)
                                 },
                                 onDragEnd = {
-                                    draggedTool = null
+                                    val targetCol = ghostCol
+                                    val targetRow = ghostRow
+                                    draggedPlacement = null
                                     dragDelta = Offset.Zero
+                                    latestOnPlaceAt(tool, targetCol, targetRow)
                                 },
                                 onDragCancel = {
-                                    draggedTool = null
+                                    draggedPlacement = null
                                     dragDelta = Offset.Zero
                                 }
+                            )
+                        }
+                    } else {
+                        Modifier
+                    }
+
+                    val canResize = isEditMode && tool.allowedSpans().size > 1
+                    val doubleTapModifier = if (canResize) {
+                        Modifier.pointerInput(placed) {
+                            detectTapGestures(
+                                onDoubleTap = { onResizeQuickTool(tool) }
                             )
                         }
                     } else {
@@ -418,12 +388,12 @@ fun QuickToolsGridSection(
                             .size(width = wDp, height = hDp)
                             .zIndex(if (isBeingDragged) 20f else 1f)
                             .scale(tileScale)
+                            .then(doubleTapModifier)
                             .then(tileInteractionModifier)
                     ) {
                         if (tool.isDpad) {
                             QuickToolsDpadTile(
                                 isEditMode = isEditMode,
-                                onLongPressEdit = { isEditMode = true },
                                 onSendKey = onSendKey,
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -432,9 +402,9 @@ fun QuickToolsGridSection(
                         } else {
                             QuickToolsActionTile(
                                 tool = tool,
+                                colSpan = placed.colSpan,
                                 isEditMode = isEditMode,
                                 liveTypingMode = liveTypingMode,
-                                onLongPressEdit = { isEditMode = !isEditMode },
                                 onClick = {
                                     if (!isEditMode) {
                                         onTriggerTool(tool)
@@ -446,26 +416,26 @@ fun QuickToolsGridSection(
                             )
                         }
 
-                        // Eye / Remove Badge directly ON the tile in Edit Mode
                         if (isEditMode) {
+                            // Top-right remove badge (-), tucked cleanly into top-right corner
                             Surface(
-                                color = RubyPrimary,
+                                color = palette.primary,
                                 shape = CircleShape,
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .padding(2.dp)
-                                    .size(20.dp)
-                                    .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape)
+                                    .offset(x = 3.dp, y = (-3).dp)
+                                    .size(16.dp)
                                     .clip(CircleShape)
+                                    .border(1.dp, palette.onAccent.copy(alpha = 0.7f), CircleShape)
                                     .clickable { onRemoveToPool(tool) }
                                     .testTag("qt_remove_${tool.name.lowercase()}")
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Default.VisibilityOff,
-                                        contentDescription = "${tool.label} Havuza Kaldır",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(11.dp)
+                                        imageVector = Icons.Default.Remove,
+                                        contentDescription = "${tool.label} Kaldır",
+                                        tint = palette.onAccent,
+                                        modifier = Modifier.size(10.dp)
                                     )
                                 }
                             }
@@ -480,63 +450,56 @@ fun QuickToolsGridSection(
 @Composable
 private fun QuickToolsActionTile(
     tool: QuickToolId,
+    colSpan: Int,
     isEditMode: Boolean,
     liveTypingMode: Boolean,
-    onLongPressEdit: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isPrimaryAccent = tool == QuickToolId.PLAY_PAUSE || tool == QuickToolId.ENTER
-    val isTurkishChar = tool.name.startsWith("TR_") || tool.name.startsWith("PUNCT_")
+    val palette = TabRemoteTheme.palette
+    val isAccentAction = tool == QuickToolId.ENTER
+    val isTurkishChar = tool.isFixedSingleCell
     var isPressed by remember { mutableStateOf(false) }
 
     val bg by animateColorAsState(
         targetValue = when {
-            isPressed -> RubyPrimary.copy(alpha = 0.34f)
-            isPrimaryAccent -> RubyPrimary.copy(alpha = 0.16f)
-            else -> SurfaceCharcoal
+            isPressed -> palette.primary
+            isAccentAction -> palette.controlThumb
+            else -> palette.surface
         },
-        animationSpec = tween(120),
+        animationSpec = tween(110),
         label = "qt_bg"
     )
 
-    val (icon, tint) = when (tool) {
-        QuickToolId.PREV -> Icons.Default.SkipPrevious to TextPrimary
-        QuickToolId.NEXT -> Icons.Default.SkipNext to TextPrimary
-        QuickToolId.VOL_DOWN -> Icons.AutoMirrored.Filled.VolumeDown to TextPrimary
-        QuickToolId.VOL_UP -> Icons.AutoMirrored.Filled.VolumeUp to TextPrimary
-        QuickToolId.MUTE -> Icons.AutoMirrored.Filled.VolumeMute to TextSecondary
-        QuickToolId.PLAY_PAUSE -> Icons.Default.PlayArrow to RubyPrimary
-        QuickToolId.SPACE -> Icons.Default.SpaceBar to TextPrimary
-        QuickToolId.BACKSPACE -> Icons.AutoMirrored.Filled.KeyboardBackspace to RubyAccent
-        QuickToolId.ENTER -> Icons.AutoMirrored.Filled.KeyboardReturn to RubyPrimary
-        QuickToolId.CUT -> Icons.Default.ContentCut to TextPrimary
-        QuickToolId.COPY -> Icons.Default.ContentCopy to TextPrimary
-        QuickToolId.PASTE -> Icons.Default.ContentPaste to TextPrimary
-        QuickToolId.ZOOM_IN -> Icons.Default.Add to TextPrimary
-        QuickToolId.ZOOM_OUT -> Icons.Default.Remove to TextPrimary
-        else -> null to if (isTurkishChar) RubyPrimary else TextPrimary
+    val contentTint = if (isPressed) {
+        palette.onAccent
+    } else if (isAccentAction) {
+        palette.primary
+    } else {
+        palette.textPrimary
     }
+
+    val icon = quickToolIcon(tool)
 
     Surface(
         color = bg,
-        shape = RoundedCornerShape(9.dp),
+        shape = RoundedCornerShape(12.dp),
         modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
             .border(
                 1.dp,
                 when {
-                    isEditMode -> RubyPrimary.copy(alpha = 0.7f)
-                    isPrimaryAccent -> RubyPrimary.copy(alpha = 0.55f)
-                    else -> SurfaceBorderRuby
+                    isPressed -> palette.primary
+                    isEditMode -> palette.borderElevated
+                    isAccentAction -> palette.borderElevated
+                    else -> palette.borderSubtle
                 },
-                RoundedCornerShape(9.dp)
+                RoundedCornerShape(12.dp)
             )
-            .clip(RoundedCornerShape(9.dp))
             .then(
                 if (!isEditMode) {
                     Modifier.pointerInput(tool, liveTypingMode) {
                         detectTapGestures(
-                            onLongPress = { onLongPressEdit() },
                             onPress = {
                                 isPressed = true
                                 val released = tryAwaitRelease()
@@ -545,114 +508,202 @@ private fun QuickToolsActionTile(
                             }
                         )
                     }
-                } else Modifier
+                } else {
+                    Modifier
+                }
             )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = tool.label,
-                    tint = tint,
-                    modifier = Modifier.size(if (tool.colSpan >= 2) 15.dp else 16.dp)
-                )
+        if (colSpan >= 2) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = tool.label,
+                        tint = contentTint,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = if (icon != null) Alignment.End else Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = tool.shortLabel,
+                        color = contentTint,
+                        fontSize = if (isTurkishChar) 14.sp else 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        softWrap = false,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (tool.shortcutHint.isNotBlank()) {
+                        Text(
+                            text = tool.shortcutHint,
+                            color = if (isPressed) palette.onAccent.copy(alpha = 0.8f) else palette.textMuted,
+                            fontSize = 7.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
-            if (icon == null || tool.colSpan >= 2) {
-                if (icon != null) Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (isTurkishChar) tool.shortLabel else tool.shortLabel,
-                    color = tint,
-                    fontSize = if (isTurkishChar) 14.sp else 9.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    softWrap = false,
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip
-                )
+        } else {
+            // 1x1 tile: Turkish/punctuation chars are fixed 1x1 text; action shortcuts show icon + crisp short label
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!isTurkishChar && icon != null) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = tool.label,
+                            tint = contentTint,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = tool.shortLabel,
+                            color = contentTint.copy(alpha = 0.9f),
+                            fontSize = 7.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.Center,
+                            softWrap = false,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip
+                        )
+                    }
+                } else {
+                    Text(
+                        text = tool.shortLabel,
+                        color = contentTint,
+                        fontSize = if (isTurkishChar) 15.sp else 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center,
+                        softWrap = false,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip
+                    )
+                }
             }
         }
     }
 }
 
+internal fun quickToolIcon(tool: QuickToolId): ImageVector? = when (tool) {
+    QuickToolId.SPACE -> Icons.Default.SpaceBar
+    QuickToolId.BACKSPACE -> Icons.AutoMirrored.Filled.KeyboardBackspace
+    QuickToolId.ENTER -> Icons.AutoMirrored.Filled.KeyboardReturn
+    QuickToolId.CUT -> Icons.Default.ContentCut
+    QuickToolId.COPY -> Icons.Default.ContentCopy
+    QuickToolId.PASTE -> Icons.Default.ContentPaste
+    QuickToolId.ZOOM_IN -> Icons.Default.Add
+    QuickToolId.ZOOM_OUT -> Icons.Default.Remove
+    QuickToolId.NEW_TAB -> Icons.Default.Add
+    QuickToolId.CLOSE_TAB -> Icons.Default.Close
+    QuickToolId.REFRESH -> Icons.Default.Refresh
+    QuickToolId.ADDRESS_BAR -> Icons.Default.Search
+    QuickToolId.FULLSCREEN -> Icons.Default.Fullscreen
+    QuickToolId.SELECT_ALL -> Icons.Default.SelectAll
+    QuickToolId.UNDO -> Icons.AutoMirrored.Filled.Undo
+    QuickToolId.REDO -> Icons.AutoMirrored.Filled.Redo
+    else -> null
+}
+
+/**
+ * Classic 3x2 compact inverted-T D-Pad:
+ * Row 0: [spacer] [UP]   [spacer]
+ * Row 1: [LEFT]   [DOWN] [RIGHT]
+ */
 @Composable
-private fun QuickToolsDpadTile(
+internal fun QuickToolsDpadTile(
     isEditMode: Boolean,
-    onLongPressEdit: () -> Unit,
     onSendKey: (hidKeyCode: Int, modifier: Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Surface(
-        color = SurfaceCharcoal,
+        color = palette.surface,
         shape = RoundedCornerShape(12.dp),
         modifier = modifier.border(
             1.dp,
-            if (isEditMode) RubyPrimary.copy(alpha = 0.75f) else SurfaceBorderRuby,
+            if (isEditMode) palette.borderElevated else palette.borderSubtle,
             RoundedCornerShape(12.dp)
         )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(6.dp),
-            verticalArrangement = Arrangement.SpaceEvenly,
+                .padding(4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
+                Spacer(modifier = Modifier.weight(1f))
                 DpadCellButton(
                     icon = Icons.Default.KeyboardArrowUp,
                     contentDescription = "Yukarı Ok",
                     isEditMode = isEditMode,
-                    onLongPressEdit = onLongPressEdit,
                     onClick = { onSendKey(HidConstants.KEY_UP, 0) },
                     modifier = Modifier
-                        .fillMaxWidth(0.36f)
+                        .weight(1f)
                         .fillMaxSize()
-                        .padding(2.dp)
                 )
+                Spacer(modifier = Modifier.weight(1f))
             }
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 DpadCellButton(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Sol Ok",
                     isEditMode = isEditMode,
-                    onLongPressEdit = onLongPressEdit,
                     onClick = { onSendKey(HidConstants.KEY_LEFT, 0) },
-                    modifier = Modifier.weight(1f).fillMaxSize()
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
                 )
                 DpadCellButton(
                     icon = Icons.Default.KeyboardArrowDown,
                     contentDescription = "Aşağı Ok",
                     isEditMode = isEditMode,
-                    onLongPressEdit = onLongPressEdit,
                     onClick = { onSendKey(HidConstants.KEY_DOWN, 0) },
-                    modifier = Modifier.weight(1f).fillMaxSize()
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
                 )
                 DpadCellButton(
                     icon = Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = "Sağ Ok",
                     isEditMode = isEditMode,
-                    onLongPressEdit = onLongPressEdit,
                     onClick = { onSendKey(HidConstants.KEY_RIGHT, 0) },
-                    modifier = Modifier.weight(1f).fillMaxSize()
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
                 )
             }
         }
@@ -664,33 +715,45 @@ private fun DpadCellButton(
     icon: ImageVector,
     contentDescription: String,
     isEditMode: Boolean,
-    onLongPressEdit: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    var isPressed by remember { mutableStateOf(false) }
+
     Surface(
-        color = SurfaceContainerCharcoal,
-        shape = RoundedCornerShape(9.dp),
+        color = if (isPressed) palette.primary else palette.surfaceContainer,
+        shape = RoundedCornerShape(8.dp),
         modifier = modifier
-            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(9.dp))
-            .clip(RoundedCornerShape(9.dp))
+            .clip(RoundedCornerShape(8.dp))
+            .border(
+                1.dp,
+                if (isPressed) palette.primary else palette.borderSubtle,
+                RoundedCornerShape(8.dp)
+            )
             .then(
                 if (!isEditMode) {
                     Modifier.pointerInput(Unit) {
                         detectTapGestures(
-                            onLongPress = { onLongPressEdit() },
-                            onTap = { onClick() }
+                            onPress = {
+                                isPressed = true
+                                val released = tryAwaitRelease()
+                                isPressed = false
+                                if (released) onClick()
+                            }
                         )
                     }
-                } else Modifier
+                } else {
+                    Modifier
+                }
             )
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                tint = RubyPrimary,
-                modifier = Modifier.size(22.dp)
+                tint = if (isPressed) palette.onAccent else palette.textPrimary,
+                modifier = Modifier.size(18.dp)
             )
         }
     }

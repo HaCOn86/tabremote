@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -29,27 +31,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.AccessibilityNew
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Sensors
-import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Mouse
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -65,30 +62,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.BuildConfig
 import com.example.data.PairedDevice
-import com.example.model.AirMouseScrollMode
 import com.example.model.AppRole
 import com.example.model.AuthSessionMode
-import com.example.model.ButtonPosition
 import com.example.model.ConnectionStatus
-import com.example.model.HidProfileMode
+import com.example.model.NavDockItemId
 import com.example.model.RemoteSettings
-import com.example.model.ScrollSide
-import com.example.model.VolumeAction
+import com.example.model.SettingsSubPage
 import com.example.ui.theme.GreenSuccess
-import com.example.ui.theme.RedDanger
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.SurfaceContainerCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
-
-enum class SettingsSubPage {
-    MAIN,
-    BLUETOOTH,
-    GOOGLE_ACCOUNT
-}
+import com.example.ui.theme.SwitchThumbChecked
+import com.example.ui.theme.SwitchThumbUnchecked
+import com.example.ui.theme.TabRemoteTheme
 
 @Composable
 fun SettingsScreen(
@@ -99,6 +82,7 @@ fun SettingsScreen(
     localDeviceId: String,
     localWifiIp: String,
     accessibilityEnabled: Boolean,
+    notificationListenerEnabled: Boolean = false,
     isReceiverRunning: Boolean,
     connectedControllerName: String?,
     cloudDevices: List<PairedDevice>,
@@ -107,6 +91,7 @@ fun SettingsScreen(
     discoveredDevices: List<BluetoothDevice>,
     isScanningBluetooth: Boolean,
     hidDiagnostics: String?,
+    isTabletLayout: Boolean = false,
     onUpdateSettings: ((RemoteSettings) -> RemoteSettings) -> Unit,
     onChangeAppRole: (AppRole) -> Unit,
     onUpdateLocalCloudName: (String) -> Unit,
@@ -118,17 +103,358 @@ fun SettingsScreen(
     onRefreshBluetooth: () -> Unit,
     onToggleBluetoothScan: () -> Unit,
     onCreateDiscoverableIntent: () -> Intent,
-    onRenameBluetoothDevice: (String) -> Unit,
     onPairAndConnectBluetooth: (BluetoothDevice) -> Unit,
     onConnectDevice: (BluetoothDevice) -> Unit,
+    onUnpairDevice: (BluetoothDevice) -> Unit = {},
+    bluetoothDeviceTypeLabel: (BluetoothDevice) -> String = { "Bluetooth Cihazı" },
     onDisconnectDevice: () -> Unit,
     onToggleFavoriteDevice: (address: String) -> Unit,
-    onChangeHidProfile: (HidProfileMode) -> Unit,
-    onSetUnifiedControlMode: (Boolean) -> Unit,
+    onMoveNavDockItem: (index: Int, delta: Int) -> Unit = { _, _ -> },
+    onMoveNavDockItemTo: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onToggleNavDockHidden: (NavDockItemId) -> Unit = {},
     onResetDockCustomizations: () -> Unit,
+    pendingSubPage: SettingsSubPage? = null,
+    onConsumePendingSubPage: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     var activeSubPage by remember { mutableStateOf(SettingsSubPage.MAIN) }
+    LaunchedEffect(pendingSubPage) {
+        if (pendingSubPage != null) {
+            activeSubPage = pendingSubPage
+            onConsumePendingSubPage()
+        }
+    }
+    val showReceiverCursorSettings = settings.appRole == AppRole.RECEIVER
+
+    val detailPage = when {
+        activeSubPage == SettingsSubPage.MAIN -> SettingsSubPage.GOOGLE_ACCOUNT
+        activeSubPage == SettingsSubPage.CURSOR && !showReceiverCursorSettings -> SettingsSubPage.TOUCHPAD_LAYOUT
+        else -> activeSubPage
+    }
+
+    @Composable
+    fun renderDetailSubPage(page: SettingsSubPage, showBack: Boolean) {
+        when (page) {
+            SettingsSubPage.BLUETOOTH -> {
+                BluetoothSettingsSubPage(
+                    settings = settings,
+                    connectionStatus = connectionStatus,
+                    bondedDevices = bondedDevices,
+                    discoveredDevices = discoveredDevices,
+                    isScanningBluetooth = isScanningBluetooth,
+                    hidDiagnostics = hidDiagnostics,
+                    deviceTypeLabel = bluetoothDeviceTypeLabel,
+                    onBack = { activeSubPage = SettingsSubPage.MAIN },
+                    onRefreshBluetooth = onRefreshBluetooth,
+                    onToggleBluetoothScan = onToggleBluetoothScan,
+                    onCreateDiscoverableIntent = onCreateDiscoverableIntent,
+                    onPairAndConnectBluetooth = onPairAndConnectBluetooth,
+                    onConnectDevice = onConnectDevice,
+                    onUnpairDevice = onUnpairDevice,
+                    onDisconnectDevice = onDisconnectDevice,
+                    onToggleFavoriteDevice = onToggleFavoriteDevice,
+                    showBackButton = showBack
+                )
+            }
+
+            SettingsSubPage.GOOGLE_ACCOUNT -> {
+                GoogleAccountDevicesSubPage(
+                    settings = settings,
+                    authSessionMode = authSessionMode,
+                    userEmail = userEmail,
+                    userDisplayName = userDisplayName,
+                    localDeviceId = localDeviceId,
+                    localWifiIp = localWifiIp,
+                    accessibilityEnabled = accessibilityEnabled,
+                    notificationListenerEnabled = notificationListenerEnabled,
+                    isReceiverRunning = isReceiverRunning,
+                    connectedControllerName = connectedControllerName,
+                    cloudDevices = cloudDevices,
+                    connectionStatus = connectionStatus,
+                    onBack = { activeSubPage = SettingsSubPage.MAIN },
+                    onChangeAppRole = onChangeAppRole,
+                    onUpdateLocalCloudName = onUpdateLocalCloudName,
+                    onRefreshEnvironment = onRefreshEnvironment,
+                    onConnectWifiReceiver = onConnectWifiReceiver,
+                    onDisconnectDevice = onDisconnectDevice,
+                    onOpenPermissionWizard = onOpenPermissionWizard,
+                    onGoogleAccountLinked = onGoogleAccountLinked,
+                    onSignOut = onSignOut,
+                    showBackButton = showBack
+                )
+            }
+
+            SettingsSubPage.THEME -> {
+                ThemeSettingsSubPage(
+                    settings = settings,
+                    onBack = { activeSubPage = SettingsSubPage.MAIN },
+                    onUpdateSettings = onUpdateSettings,
+                    showBackButton = showBack
+                )
+            }
+
+            SettingsSubPage.SENSITIVITY -> {
+                SensitivitySettingsSubPage(
+                    settings = settings,
+                    onBack = { activeSubPage = SettingsSubPage.MAIN },
+                    onUpdateSettings = onUpdateSettings,
+                    showBackButton = showBack
+                )
+            }
+
+            SettingsSubPage.VOLUME_KEYS -> {
+                VolumeKeysSettingsSubPage(
+                    settings = settings,
+                    onBack = { activeSubPage = SettingsSubPage.MAIN },
+                    onUpdateSettings = onUpdateSettings,
+                    showBackButton = showBack
+                )
+            }
+
+            SettingsSubPage.CURSOR -> {
+                CursorSettingsSubPage(
+                    settings = settings,
+                    accessibilityEnabled = accessibilityEnabled,
+                    onBack = { activeSubPage = SettingsSubPage.MAIN },
+                    onUpdateSettings = onUpdateSettings,
+                    onOpenPermissionWizard = onOpenPermissionWizard,
+                    showBackButton = showBack
+                )
+            }
+
+            SettingsSubPage.TOUCHPAD_LAYOUT -> {
+                TouchpadLayoutSettingsSubPage(
+                    settings = settings,
+                    onBack = { activeSubPage = SettingsSubPage.MAIN },
+                    onUpdateSettings = onUpdateSettings,
+                    onMoveNavDockItem = onMoveNavDockItem,
+                    onMoveNavDockItemTo = onMoveNavDockItemTo,
+                    onToggleNavDockHidden = onToggleNavDockHidden,
+                    onResetDockCustomizations = onResetDockCustomizations,
+                    showBackButton = showBack
+                )
+            }
+
+            SettingsSubPage.MAIN -> Unit
+        }
+    }
+
+    @Composable
+    fun renderMainCategoryList(highlightedPage: SettingsSubPage?) {
+        SettingsCard(
+            title = "BAĞLANTI & HESAP",
+            icon = Icons.Default.AccountCircle,
+            headerAction = {
+                Spacer(modifier = Modifier.width(42.dp))
+            }
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsNavEntryTile(
+                    icon = Icons.Default.AccountCircle,
+                    title = "Google Hesabı & Alıcı Cihazlar",
+                    subtitle = if (authSessionMode == AuthSessionMode.GOOGLE && userEmail.isNotBlank()) {
+                        "$userEmail • ${settings.appRole.label}"
+                    } else {
+                        "${authSessionMode.label} • Çalışma modu & alıcı kurulumu"
+                    },
+                    badgeColor = if (authSessionMode == AuthSessionMode.GOOGLE) GreenSuccess else palette.primary,
+                    selected = highlightedPage == SettingsSubPage.GOOGLE_ACCOUNT,
+                    onClick = { activeSubPage = SettingsSubPage.GOOGLE_ACCOUNT },
+                    testTag = "settings_nav_google"
+                )
+
+                SettingsNavEntryTile(
+                    icon = Icons.Default.Bluetooth,
+                    title = "Bluetooth HID & Cihazlar",
+                    subtitle = when (connectionStatus) {
+                        is ConnectionStatus.Connected -> "Bağlı: ${connectionStatus.deviceName}"
+                        else -> "Fare + Klavye HID • ${bondedDevices.size} eşleşmiş cihaz"
+                    },
+                    badgeColor = if (connectionStatus is ConnectionStatus.Connected && !connectionStatus.isWifi) {
+                        GreenSuccess
+                    } else palette.primary,
+                    selected = highlightedPage == SettingsSubPage.BLUETOOTH,
+                    onClick = { activeSubPage = SettingsSubPage.BLUETOOTH },
+                    testTag = "settings_nav_bluetooth"
+                )
+            }
+        }
+
+        SettingsCard(
+            title = "GÖRÜNÜM, HASSASİYET & TOUCHPAD",
+            icon = Icons.Default.Tune
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsNavEntryTile(
+                    icon = Icons.Default.Dashboard,
+                    title = "Touchpad, Hizalama & Dock",
+                    subtitle = "${settings.horizontalPanPosition.label} • ${settings.scrollSide.label}",
+                    badgeColor = palette.primary,
+                    selected = highlightedPage == SettingsSubPage.TOUCHPAD_LAYOUT,
+                    onClick = { activeSubPage = SettingsSubPage.TOUCHPAD_LAYOUT },
+                    testTag = "settings_nav_touchpad_layout"
+                )
+
+                if (showReceiverCursorSettings) {
+                    SettingsNavEntryTile(
+                        icon = Icons.Default.Mouse,
+                        title = "Alıcı İmleç Ayarları",
+                        subtitle = "${"%.1f".format(settings.cursorScale)}x • ${settings.cursorContrastMode.label} kontrast",
+                        badgeColor = Color(settings.cursorColorArgb),
+                        selected = highlightedPage == SettingsSubPage.CURSOR,
+                        onClick = { activeSubPage = SettingsSubPage.CURSOR },
+                        testTag = "settings_nav_cursor"
+                    )
+                }
+
+                SettingsNavEntryTile(
+                    icon = Icons.Default.Palette,
+                    title = "Tema & Renk Paleti",
+                    subtitle = if (settings.useDynamicColor) {
+                        "Sistem Dinamik Rengi (Material You) aktif"
+                    } else {
+                        "Aktif palet: ${settings.themePreset.label}"
+                    },
+                    badgeColor = palette.primary,
+                    selected = highlightedPage == SettingsSubPage.THEME,
+                    onClick = { activeSubPage = SettingsSubPage.THEME },
+                    testTag = "settings_nav_theme"
+                )
+
+                SettingsNavEntryTile(
+                    icon = Icons.Default.Tune,
+                    title = "Hassasiyet & Kalibrasyon",
+                    subtitle = "Touchpad (${"%.1f".format(settings.pointerSensitivity)}x) • Air Mouse (${"%.1f".format(settings.airMouseSensitivity)}x)",
+                    badgeColor = palette.primary,
+                    selected = highlightedPage == SettingsSubPage.SENSITIVITY,
+                    onClick = { activeSubPage = SettingsSubPage.SENSITIVITY },
+                    testTag = "settings_nav_sensitivity"
+                )
+
+                SettingsNavEntryTile(
+                    icon = Icons.AutoMirrored.Filled.VolumeUp,
+                    title = "Ses Tuşları",
+                    subtitle = "Touchpad & Air Mouse ses açma/kısma kısayolları",
+                    badgeColor = palette.primary,
+                    selected = highlightedPage == SettingsSubPage.VOLUME_KEYS,
+                    onClick = { activeSubPage = SettingsSubPage.VOLUME_KEYS },
+                    testTag = "settings_nav_volume_keys"
+                )
+            }
+        }
+
+        Surface(
+            color = palette.shadedPanel,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, palette.borderAccent, RoundedCornerShape(14.dp))
+                .testTag("settings_info_card")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(palette.primary.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                        .border(1.dp, palette.primary.copy(alpha = 0.35f), RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "İpucu ve Bilgi",
+                        tint = palette.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "ÖZELLEŞTİRME İPUCU",
+                        color = palette.primary,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp
+                    )
+                    Text(
+                        text = "Alt navigasyon çubuğunu 'Touchpad, Hizalama & Dock' altından; Akıllı Klavye ve Wi-Fi panellerini ise 'Düzenle' butonlarıyla 2D serbest ızgarada özelleştirebilirsiniz.",
+                        color = palette.textSecondary,
+                        fontSize = 10.5.sp,
+                        lineHeight = 14.5.sp
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                color = palette.surface,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .border(1.dp, palette.borderAccent, RoundedCornerShape(20.dp))
+                    .testTag("settings_version_badge")
+            ) {
+                Text(
+                    text = "TabRemote v${BuildConfig.VERSION_NAME}",
+                    color = palette.textSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.6.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                )
+            }
+        }
+    }
+
+    if (isTabletLayout) {
+        Row(
+            modifier = modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(top = 8.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(0.86f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                renderMainCategoryList(highlightedPage = detailPage)
+            }
+
+            Surface(
+                color = palette.shadedPanel,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .weight(1.14f)
+                    .fillMaxHeight()
+                    .border(1.dp, palette.borderSubtle, RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    renderDetailSubPage(page = detailPage, showBack = false)
+                }
+            }
+        }
+        return
+    }
 
     BackHandler(enabled = activeSubPage != SettingsSubPage.MAIN) {
         activeSubPage = SettingsSubPage.MAIN
@@ -156,339 +482,10 @@ fun SettingsScreen(
                 .padding(top = 6.dp, start = 8.dp, end = 8.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            when (page) {
-                SettingsSubPage.BLUETOOTH -> {
-                    BluetoothSettingsSubPage(
-                        settings = settings,
-                        connectionStatus = connectionStatus,
-                        bondedDevices = bondedDevices,
-                        discoveredDevices = discoveredDevices,
-                        isScanningBluetooth = isScanningBluetooth,
-                        hidDiagnostics = hidDiagnostics,
-                        onBack = { activeSubPage = SettingsSubPage.MAIN },
-                        onRefreshBluetooth = onRefreshBluetooth,
-                        onToggleBluetoothScan = onToggleBluetoothScan,
-                        onCreateDiscoverableIntent = onCreateDiscoverableIntent,
-                        onRenameBluetoothDevice = onRenameBluetoothDevice,
-                        onPairAndConnectBluetooth = onPairAndConnectBluetooth,
-                        onConnectDevice = onConnectDevice,
-                        onDisconnectDevice = onDisconnectDevice,
-                        onToggleFavoriteDevice = onToggleFavoriteDevice
-                    )
-                }
-
-                SettingsSubPage.GOOGLE_ACCOUNT -> {
-                    GoogleAccountDevicesSubPage(
-                        settings = settings,
-                        authSessionMode = authSessionMode,
-                        userEmail = userEmail,
-                        userDisplayName = userDisplayName,
-                        localDeviceId = localDeviceId,
-                        localWifiIp = localWifiIp,
-                        accessibilityEnabled = accessibilityEnabled,
-                        isReceiverRunning = isReceiverRunning,
-                        connectedControllerName = connectedControllerName,
-                        cloudDevices = cloudDevices,
-                        connectionStatus = connectionStatus,
-                        onBack = { activeSubPage = SettingsSubPage.MAIN },
-                        onChangeAppRole = onChangeAppRole,
-                        onUpdateLocalCloudName = onUpdateLocalCloudName,
-                        onRefreshEnvironment = onRefreshEnvironment,
-                        onConnectWifiReceiver = onConnectWifiReceiver,
-                        onDisconnectDevice = onDisconnectDevice,
-                        onOpenPermissionWizard = onOpenPermissionWizard,
-                        onGoogleAccountLinked = onGoogleAccountLinked,
-                        onSignOut = onSignOut
-                    )
-                }
-
-                SettingsSubPage.MAIN -> {
-                    // 1. Sub-page Entry Tiles: Bluetooth & Google Account + Devices + Working Mode
-                    SettingsCard(
-                        title = "BAĞLANTI, HESAP VE ÇALIŞMA MODU",
-                        icon = Icons.Default.AccountCircle,
-                        headerAction = {
-                            Spacer(modifier = Modifier.width(42.dp))
-                        }
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SettingsNavEntryTile(
-                                icon = Icons.Default.Bluetooth,
-                                title = "Bluetooth HID & Cihazlar",
-                                subtitle = when (connectionStatus) {
-                                    is ConnectionStatus.Connected -> "Bağlı: ${connectionStatus.deviceName}"
-                                    else -> "Yayın adı: ${settings.customBluetoothName} • ${bondedDevices.size} eşleşmiş cihaz"
-                                },
-                                badgeColor = if (connectionStatus is ConnectionStatus.Connected && !connectionStatus.isWifi) GreenSuccess else RubyPrimary,
-                                onClick = { activeSubPage = SettingsSubPage.BLUETOOTH },
-                                testTag = "settings_nav_bluetooth"
-                            )
-
-                            SettingsNavEntryTile(
-                                icon = Icons.Default.AccountCircle,
-                                title = "Google Hesabı & Alıcı Cihazlar",
-                                subtitle = if (authSessionMode == AuthSessionMode.GOOGLE && userEmail.isNotBlank()) {
-                                    "$userEmail • ${cloudDevices.count { it.id != localDeviceId }} kayıtlı cihaz"
-                                } else {
-                                    "${authSessionMode.label} • Dokunarak Google hesabı bağlayın"
-                                },
-                                badgeColor = if (authSessionMode == AuthSessionMode.GOOGLE) GreenSuccess else RubyPrimary,
-                                onClick = { activeSubPage = SettingsSubPage.GOOGLE_ACCOUNT },
-                                testTag = "settings_nav_google"
-                            )
-
-                            ChoiceRow(
-                                label = "Uygulama Çalışma Modu",
-                                options = listOf(AppRole.CONTROLLER, AppRole.RECEIVER),
-                                selected = settings.appRole,
-                                optionLabel = { it.label },
-                                onSelect = onChangeAppRole
-                            )
-
-                            SettingsNavEntryTile(
-                                icon = Icons.Default.AccessibilityNew,
-                                title = "İzinler & Android 13 Kısıtlı Ayar Kontrolü",
-                                subtitle = if (accessibilityEnabled) {
-                                    "Erişilebilirlik aktif • Alıcı ve imleç denetimi hazır"
-                                } else {
-                                    "Erişilebilirlik kapalı — Alıcı modda gerekli, açmak için dokunun"
-                                },
-                                badgeColor = if (accessibilityEnabled) GreenSuccess else RedDanger,
-                                onClick = onOpenPermissionWizard,
-                                testTag = "settings_open_permission_wizard"
-                            )
-                        }
-                    }
-
-                    // 2. TOUCHPAD & AIR MOUSE DÜZENİ VE ÖZELLEŞTİRME
-                    SettingsCard(
-                        title = "TOUCHPAD, HİZALAMA & DOCK ÖZELLEŞTİRME",
-                        icon = Icons.Default.Dashboard
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SettingToggleRow(
-                                label = "Birleşik Kontrol Modu (Touchpad + Air Mouse)",
-                                description = "Touchpad içinden tek dokunuşla morf animasyonlu Air Mouse moduna geçer.",
-                                checked = settings.unifiedControlMode,
-                                onCheckedChange = onSetUnifiedControlMode
-                            )
-
-                            ChoiceRow(
-                                label = "Bluetooth HID Profili",
-                                options = listOf(HidProfileMode.PRECISION_TOUCHPAD, HidProfileMode.CLASSIC_MOUSE),
-                                selected = settings.hidProfileMode,
-                                optionLabel = {
-                                    if (it == HidProfileMode.PRECISION_TOUCHPAD) "Precision Touchpad" else "Klasik + Ctrl Zoom"
-                                },
-                                onSelect = onChangeHidProfile
-                            )
-                            Text(
-                                text = settings.hidProfileMode.description,
-                                color = TextMuted,
-                                fontSize = 9.sp
-                            )
-
-                            ChoiceRow(
-                                label = "Dikey Kaydırma Tipi",
-                                options = listOf(AirMouseScrollMode.SCROLL_STRIP, AirMouseScrollMode.STEP_BUTTONS),
-                                selected = settings.airMouseScrollMode,
-                                optionLabel = { it.label },
-                                onSelect = { onUpdateSettings { s -> s.copy(airMouseScrollMode = it) } }
-                            )
-
-                            SettingToggleRow(
-                                label = "F1 & F2 Ekstra Fare Tuşlarını Göster",
-                                description = "Alt dock'ta özelleştirilebilir 4. ve 5. fare tuşları",
-                                checked = settings.showFunctionButtons,
-                                onCheckedChange = { onUpdateSettings { s -> s.copy(showFunctionButtons = it) } }
-                            )
-
-                            Button(
-                                onClick = onResetDockCustomizations,
-                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceContainerCharcoal),
-                                shape = RoundedCornerShape(9.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(9.dp))
-                            ) {
-                                Icon(Icons.Default.RestartAlt, contentDescription = null, tint = RubyPrimary, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Quick Tools Izgarası & Dock Sırasını Sıfırla", color = RubyPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            SettingToggleRow(
-                                label = "Üst Yatay Kaydırma Rayı",
-                                description = "Üst bölümde tırtıklı yatay galeri/sekme geçiş rayı gösterir",
-                                checked = settings.showHorizontalScrollGutter,
-                                onCheckedChange = { onUpdateSettings { s -> s.copy(showHorizontalScrollGutter = it) } }
-                            )
-
-                            ChoiceRow(
-                                label = "Dikey Kaydırma Alanı Yeri",
-                                options = listOf(ScrollSide.RIGHT, ScrollSide.LEFT, ScrollSide.HIDDEN),
-                                selected = settings.scrollSide,
-                                optionLabel = { it.label },
-                                onSelect = { onUpdateSettings { s -> s.copy(scrollSide = it) } }
-                            )
-
-                            ChoiceRow(
-                                label = "Fare Tuşları Konumu",
-                                options = listOf(ButtonPosition.BOTTOM, ButtonPosition.TOP, ButtonPosition.SPLIT),
-                                selected = settings.buttonPosition,
-                                optionLabel = { it.label },
-                                onSelect = { onUpdateSettings { s -> s.copy(buttonPosition = it) } }
-                            )
-
-                            SettingToggleRow(
-                                label = "Sağ Tık Butonunu Göster",
-                                description = "Tablette bağlam menüsü açmak için sağ tık butonu",
-                                checked = settings.showRightClick,
-                                onCheckedChange = { onUpdateSettings { s -> s.copy(showRightClick = it) } }
-                            )
-
-                            SettingToggleRow(
-                                label = "Orta Tuş Butonunu Göster",
-                                description = "Bağlantı ve sekme açmak için orta tık butonu",
-                                checked = settings.showMiddleClick,
-                                onCheckedChange = { onUpdateSettings { s -> s.copy(showMiddleClick = it) } }
-                            )
-
-                            SettingToggleRow(
-                                label = "Dokunarak Sol Tıklama (Tap to Click)",
-                                description = "Touchpad yüzeyine tek dokunma sol tık gönderir",
-                                checked = settings.tapToClick,
-                                onCheckedChange = { onUpdateSettings { s -> s.copy(tapToClick = it) } }
-                            )
-
-                            SettingToggleRow(
-                                label = "Ters Kaydırma (Invert Scroll)",
-                                description = "Kaydırma yönünü tersine çevirir",
-                                checked = settings.invertScroll,
-                                onCheckedChange = { onUpdateSettings { s -> s.copy(invertScroll = it) } }
-                            )
-
-                            SettingToggleRow(
-                                label = "Titreşimli Geri Bildirim (Haptics)",
-                                description = "Tıklama ve kaydırma adımlarında dokunsal titreşim",
-                                checked = settings.hapticsEnabled,
-                                onCheckedChange = { onUpdateSettings { s -> s.copy(hapticsEnabled = it) } }
-                            )
-                        }
-                    }
-
-                    // 3. TOUCHPAD VOLUME KEYS
-                    SettingsCard(
-                        title = "TOUCHPAD SES TUŞU AYARLARI",
-                        icon = Icons.Default.TouchApp
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = "Touchpad ekranındayken telefonun ses tuşlarına basıldığında yapılacak eylemi belirleyin.",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-                            ModernVolumeActionSelector(
-                                label = "Ses Kısma Tuşu (Volume Down)",
-                                selectedAction = settings.touchpadVolumeDownAction,
-                                onSelect = { onUpdateSettings { s -> s.copy(touchpadVolumeDownAction = it) } }
-                            )
-                            ModernVolumeActionSelector(
-                                label = "Ses Açma Tuşu (Volume Up)",
-                                selectedAction = settings.touchpadVolumeUpAction,
-                                onSelect = { onUpdateSettings { s -> s.copy(touchpadVolumeUpAction = it) } }
-                            )
-                        }
-                    }
-
-                    // 4. AIR MOUSE VOLUME KEYS
-                    SettingsCard(
-                        title = "AIR MOUSE SES TUŞU AYARLARI",
-                        icon = Icons.Default.Sensors
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = "Air Mouse modundayken fiziksel ses tuşları ile havada sol/sağ tık veya kaydırma yapın.",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-                            ModernVolumeActionSelector(
-                                label = "Air Mouse Ses Kısma Tuşu",
-                                selectedAction = settings.airMouseVolumeDownAction,
-                                onSelect = { onUpdateSettings { s -> s.copy(airMouseVolumeDownAction = it) } }
-                            )
-                            ModernVolumeActionSelector(
-                                label = "Air Mouse Ses Açma Tuşu",
-                                selectedAction = settings.airMouseVolumeUpAction,
-                                onSelect = { onUpdateSettings { s -> s.copy(airMouseVolumeUpAction = it) } }
-                            )
-                        }
-                    }
-
-                    // 5. HASSASIYET VE HAREKET AYARLARI
-                    SettingsCard(
-                        title = "HASSASİYET VE HAREKET AYARLARI",
-                        icon = Icons.Default.Sensors
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SliderRow(
-                                label = "Touchpad İmleç Hızı",
-                                value = settings.pointerSensitivity,
-                                range = 0.5f..3.0f,
-                                displayValue = "${"%.1f".format(settings.pointerSensitivity)}x",
-                                onValueChange = { onUpdateSettings { s -> s.copy(pointerSensitivity = it) } }
-                            )
-
-                            SliderRow(
-                                label = "Kaydırma Hızı (Scroll Speed)",
-                                value = settings.scrollSensitivity,
-                                range = 0.4f..2.5f,
-                                displayValue = "${"%.1f".format(settings.scrollSensitivity)}x",
-                                onValueChange = { onUpdateSettings { s -> s.copy(scrollSensitivity = it) } }
-                            )
-
-                            SliderRow(
-                                label = "Air Mouse Jiroskop Hassasiyeti",
-                                value = settings.airMouseSensitivity,
-                                range = 0.5f..5.0f,
-                                displayValue = "${"%.1f".format(settings.airMouseSensitivity)}x",
-                                onValueChange = { onUpdateSettings { s -> s.copy(airMouseSensitivity = it) } }
-                            )
-
-                            SliderRow(
-                                label = "Titreme Filtresi (Deadband)",
-                                value = settings.airMouseDeadband,
-                                range = 0.01f..0.12f,
-                                displayValue = "${"%.2f".format(settings.airMouseDeadband)}",
-                                onValueChange = { onUpdateSettings { s -> s.copy(airMouseDeadband = it) } }
-                            )
-                        }
-                    }
-
-                    // Compact Footer Version Pill
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Surface(
-                            color = SurfaceCharcoal,
-                            shape = RoundedCornerShape(20.dp),
-                            modifier = Modifier
-                                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(20.dp))
-                                .testTag("settings_version_badge")
-                        ) {
-                            Text(
-                                text = "TabRemote v${BuildConfig.VERSION_NAME}",
-                                color = TextSecondary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = 0.6.sp,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
-                            )
-                        }
-                    }
-                }
+            if (page == SettingsSubPage.MAIN) {
+                renderMainCategoryList(highlightedPage = null)
+            } else {
+                renderDetailSubPage(page = page, showBack = true)
             }
 
             Spacer(modifier = Modifier.height(92.dp))
@@ -497,21 +494,25 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsNavEntryTile(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+internal fun SettingsNavEntryTile(
+    icon: ImageVector,
     title: String,
     subtitle: String,
     badgeColor: Color,
     onClick: () -> Unit,
-    testTag: String
+    testTag: String,
+    selected: Boolean = false
 ) {
+    val palette = TabRemoteTheme.palette
+    val shape = RoundedCornerShape(12.dp)
     Surface(
-        color = SurfaceContainerCharcoal,
-        shape = RoundedCornerShape(12.dp),
+        color = if (selected) palette.primary.copy(alpha = 0.14f) else palette.surfaceContainer,
+        shape = shape,
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(12.dp))
-            .clip(RoundedCornerShape(12.dp))
+            .heightIn(min = 56.dp)
+            .clip(shape)
+            .border(1.dp, if (selected) palette.primary else palette.borderAccent, shape)
             .clickable { onClick() }
             .testTag(testTag)
     ) {
@@ -525,8 +526,8 @@ private fun SettingsNavEntryTile(
             Box(
                 modifier = Modifier
                     .size(36.dp)
-                    .background(badgeColor.copy(alpha = 0.14f), RoundedCornerShape(9.dp))
-                    .border(1.dp, badgeColor.copy(alpha = 0.4f), RoundedCornerShape(9.dp)),
+                    .background(badgeColor.copy(alpha = 0.16f), RoundedCornerShape(9.dp))
+                    .border(1.dp, badgeColor.copy(alpha = 0.48f), RoundedCornerShape(9.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -539,20 +540,20 @@ private fun SettingsNavEntryTile(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = TextPrimary,
+                    color = palette.textPrimary,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = subtitle,
-                    color = TextSecondary,
+                    color = palette.textSecondary,
                     fontSize = 10.sp
                 )
             }
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "$title aç",
-                tint = RubyPrimary,
+                tint = palette.primary,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -562,16 +563,18 @@ private fun SettingsNavEntryTile(
 @Composable
 internal fun SettingsCard(
     title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     headerAction: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
+    val palette = TabRemoteTheme.palette
+    val shape = RoundedCornerShape(14.dp)
     Surface(
-        color = SurfaceCharcoal,
-        shape = RoundedCornerShape(14.dp),
+        color = palette.surface,
+        shape = shape,
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(14.dp))
+            .border(1.dp, palette.borderAccent, shape)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -586,13 +589,13 @@ internal fun SettingsCard(
                     Icon(
                         imageVector = icon,
                         contentDescription = title,
-                        tint = RubyPrimary,
+                        tint = palette.primary,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = title,
-                        color = TextPrimary,
+                        color = palette.textPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.7.sp
@@ -606,144 +609,6 @@ internal fun SettingsCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ModernVolumeActionSelector(
-    label: String,
-    selectedAction: VolumeAction,
-    onSelect: (VolumeAction) -> Unit
-) {
-    var showSheet by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState()
-
-    Column {
-        Text(text = label, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Surface(
-            color = SurfaceContainerCharcoal,
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .border(1.dp, RubyPrimary.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                .clickable { showSheet = true }
-                .padding(horizontal = 10.dp, vertical = 8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
-                    Text(
-                        text = selectedAction.title,
-                        color = RubyPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = selectedAction.description,
-                        color = TextSecondary,
-                        fontSize = 9.sp
-                    )
-                }
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Değiştir",
-                    tint = RubyPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        if (showSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showSheet = false },
-                sheetState = sheetState,
-                containerColor = SurfaceCharcoal,
-                contentColor = TextPrimary
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 32.dp)
-                ) {
-                    Text(
-                        text = "Ses Tuşu İşlevi Seçin",
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    val grouped = VolumeAction.entries.groupBy { it.category }
-                    grouped.forEach { (category, actions) ->
-                        Text(
-                            text = category,
-                            color = RubyPrimary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
-                            modifier = Modifier.padding(vertical = 6.dp)
-                        )
-
-                        actions.forEach { action ->
-                            val isSelected = action == selectedAction
-                            Surface(
-                                color = if (isSelected) RubyPrimary.copy(alpha = 0.2f) else SurfaceContainerCharcoal,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 3.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) RubyPrimary else SurfaceBorderRuby,
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        onSelect(action)
-                                        showSheet = false
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = action.title,
-                                            color = if (isSelected) RubyPrimary else TextPrimary,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = action.description,
-                                            color = TextSecondary,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Seçili",
-                                            tint = RubyPrimary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 @Composable
 internal fun <T> ChoiceRow(
     label: String,
@@ -752,37 +617,46 @@ internal fun <T> ChoiceRow(
     optionLabel: (T) -> String,
     onSelect: (T) -> Unit
 ) {
+    val palette = TabRemoteTheme.palette
     Column {
-        Text(text = label, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = label, color = palette.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(5.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             options.forEach { option ->
                 val isSelected = option == selected
+                val shape = RoundedCornerShape(8.dp)
                 Surface(
-                    color = if (isSelected) RubyPrimary.copy(alpha = 0.22f) else SurfaceContainerCharcoal,
-                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) palette.primary else palette.surfaceContainer,
+                    shape = shape,
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .heightIn(min = 42.dp)
+                        .clip(shape)
                         .border(
                             1.dp,
-                            if (isSelected) RubyPrimary else SurfaceBorderRuby,
-                            RoundedCornerShape(8.dp)
+                            if (isSelected) palette.primary else palette.borderAccent,
+                            shape
                         )
-                        .clickable { onSelect(option) }
-                        .padding(vertical = 8.dp),
-                    contentColor = if (isSelected) RubyPrimary else TextSecondary
+                        .clickable { onSelect(option) },
+                    contentColor = if (isSelected) palette.onAccent else palette.textSecondary
                 ) {
-                    Text(
-                        text = optionLabel(option),
-                        fontSize = 10.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = optionLabel(option),
+                            fontSize = 10.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2
+                        )
+                    }
                 }
             }
         }
@@ -790,12 +664,13 @@ internal fun <T> ChoiceRow(
 }
 
 @Composable
-private fun SettingToggleRow(
+internal fun SettingToggleRow(
     label: String,
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val palette = TabRemoteTheme.palette
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -804,46 +679,18 @@ private fun SettingToggleRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(text = label, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            Text(text = description, color = TextSecondary, fontSize = 9.sp)
+            Text(text = label, color = palette.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = description, color = palette.textSecondary, fontSize = 9.5.sp)
         }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = RubyPrimary,
-                uncheckedThumbColor = TextMuted,
-                uncheckedTrackColor = SurfaceBorderRuby
-            )
-        )
-    }
-}
-
-@Composable
-private fun SliderRow(
-    label: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    displayValue: String,
-    onValueChange: (Float) -> Unit
-) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(text = label, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            Text(text = displayValue, color = RubyPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        }
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = range,
-            colors = SliderDefaults.colors(
-                thumbColor = RubyPrimary,
-                activeTrackColor = RubyPrimary,
-                inactiveTrackColor = SurfaceBorderRuby
+                checkedThumbColor = SwitchThumbChecked,
+                checkedTrackColor = palette.primary,
+                uncheckedThumbColor = SwitchThumbUnchecked,
+                uncheckedTrackColor = palette.surfaceContainer,
+                uncheckedBorderColor = palette.borderAccent
             )
         )
     }

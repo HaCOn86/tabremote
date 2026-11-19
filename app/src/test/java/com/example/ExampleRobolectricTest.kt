@@ -1,19 +1,36 @@
 package com.example
 
 import android.content.Context
+import android.graphics.Color as AndroidColor
 import androidx.test.core.app.ApplicationProvider
+import com.example.accessibility.RemoteAccessibilityService
 import com.example.bluetooth.HidConstants
+import com.example.data.SettingsPrefsStore
 import com.example.model.AppRole
+import com.example.model.AuthSessionMode
 import com.example.model.ButtonPosition
+import com.example.model.CursorContrastMode
+import com.example.model.GamepadLayoutOffsets
 import com.example.model.GamepadStyle
-import com.example.model.HidProfileMode
+import com.example.model.HorizontalPanPosition
+import com.example.model.InputSubMode
 import com.example.model.MediaDockItemId
 import com.example.model.MouseButton
 import com.example.model.NavDockItemId
+import com.example.model.QuickToolId
+import com.example.model.QuickToolPlacement
+import com.example.model.QuickToolsLayoutEngine
 import com.example.model.RemoteSettings
+import com.example.model.SparseCell
+import com.example.model.SparseGridEngine
+import com.example.model.ThemePreset
 import com.example.model.VolumeAction
+import com.example.model.WifiQuickWidgetId
+import com.example.model.WifiWidgetPlacement
+import com.example.viewmodel.NavTab
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,9 +50,9 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify v2 app version identity`() {
-        assertEquals("2.0.0", BuildConfig.VERSION_NAME)
-        assertEquals(2, BuildConfig.VERSION_CODE)
+    fun `verify v30 app version identity`() {
+        assertEquals("3.0", BuildConfig.VERSION_NAME)
+        assertEquals(5, BuildConfig.VERSION_CODE)
     }
 
     @Test
@@ -64,12 +81,10 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify v2 default remote settings and dock orders`() {
+    fun `verify v25 default remote settings and dock orders`() {
         val settings = RemoteSettings()
         assertEquals(AppRole.CONTROLLER, settings.appRole)
-        assertTrue(settings.unifiedControlMode)
-        assertEquals("TabRemote", settings.customBluetoothName)
-        assertEquals(HidProfileMode.PRECISION_TOUCHPAD, settings.hidProfileMode)
+        assertEquals(GamepadLayoutOffsets(), settings.gamepadOffsets)
         assertTrue(settings.showFunctionButtons)
         assertEquals(VolumeAction.SCROLL_DOWN, settings.touchpadVolumeDownAction)
         assertEquals(VolumeAction.SCROLL_UP, settings.touchpadVolumeUpAction)
@@ -81,6 +96,9 @@ class ExampleRobolectricTest {
         assertEquals(GamepadStyle.PLAYSTATION, settings.gamepadStyle)
         assertFalse(settings.splitPcKeyboard)
         assertEquals(1.6f, settings.pcSplitGapWeight)
+        assertEquals(ThemePreset.RUBY, settings.themePreset)
+        assertFalse(settings.useDynamicColor)
+        assertEquals(1.0f, settings.cursorScale)
 
         // Navigation Dock uses F1/F2 naming
         assertEquals(NavDockItemId.F1, settings.navDockOrder.first())
@@ -107,16 +125,16 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify HID descriptor contains Precision Touchpad first and Gamepad collections`() {
-        assertTrue(HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR.size > HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR.size)
-        // Must lead with Digitizers (0x05, 0x0D) / Touch Pad (0x09, 0x05) so hosts identify it as a Touchpad
-        assertEquals(0x05.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[0])
-        assertEquals(0x0D.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[1])
-        assertEquals(0x09.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[2])
-        assertEquals(0x05.toByte(), HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR[3])
-        assertEquals(256, HidConstants.PTP_CERT_BLOB.size)
-        assertEquals(4.toByte(), HidConstants.REPORT_ID_TOUCHPAD)
-        assertEquals(9.toByte(), HidConstants.REPORT_ID_GAMEPAD)
+    fun `verify HID descriptor contains Classic Combo Mouse Keyboard and Consumer collections`() {
+        assertTrue(HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR.size > 70)
+        // Must lead with Generic Desktop (0x05, 0x01) / Mouse (0x09, 0x02) for universal HID host compatibility
+        assertEquals(0x05.toByte(), HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR[0])
+        assertEquals(0x01.toByte(), HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR[1])
+        assertEquals(0x09.toByte(), HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR[2])
+        assertEquals(0x02.toByte(), HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR[3])
+        assertEquals(1.toByte(), HidConstants.REPORT_ID_MOUSE)
+        assertEquals(2.toByte(), HidConstants.REPORT_ID_KEYBOARD)
+        assertEquals(3.toByte(), HidConstants.REPORT_ID_CONSUMER)
     }
 
     @Test
@@ -132,13 +150,17 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify 6-column QuickToolsLayoutEngine packs 4x4 D-Pad and 2x1 and 1x1 without overlap`() {
-        val (placed, rowCount) = com.example.model.QuickToolsLayoutEngine.pack(
-            tools = com.example.model.QuickToolId.defaultActiveGrid,
+    fun `verify 6-column QuickToolsLayoutEngine packs 3x2 D-Pad all Turkish letters and controls without overlap`() {
+        val (placed, rowCount) = QuickToolsLayoutEngine.pack(
+            tools = QuickToolId.defaultActiveGrid,
             columns = 6
         )
-        assertEquals(com.example.model.QuickToolId.defaultActiveGrid.size, placed.size)
-        assertEquals(6, rowCount)
+        assertEquals(QuickToolId.defaultActiveGrid.size, placed.size)
+        assertEquals(5, rowCount)
+        assertTrue(QuickToolId.TR_CAPITAL_I in QuickToolId.defaultActiveGrid)
+        assertTrue(QuickToolId.ESC in QuickToolId.defaultActiveGrid)
+        assertTrue(QuickToolId.HOME_KEY in QuickToolId.defaultPool)
+        assertTrue(QuickToolId.NEW_TAB in QuickToolId.defaultPool)
 
         val grid = Array(rowCount) { BooleanArray(6) }
         for (item in placed) {
@@ -151,35 +173,168 @@ class ExampleRobolectricTest {
                 }
             }
         }
-        val dpad = placed.first { it.tool == com.example.model.QuickToolId.DPAD }
-        assertEquals(4, dpad.colSpan)
-        assertEquals(4, dpad.rowSpan)
+        val dpad = placed.first { it.tool == QuickToolId.DPAD }
+        assertEquals(3, dpad.colSpan)
+        assertEquals(2, dpad.rowSpan)
+
+        val space = placed.first { it.tool == QuickToolId.SPACE }
+        assertEquals(2, space.colSpan)
     }
 
     @Test
-    fun `verify SettingsPrefsStore persists AuthSessionMode QuickTools and liveTypingMode`() {
+    fun `verify SettingsPrefsStore persists AuthSessionMode QuickTools ThemePreset Cursor and GamepadOffsets`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val store = com.example.data.SettingsPrefsStore(context)
+        val store = SettingsPrefsStore(context)
 
-        store.setAuthSessionMode(com.example.model.AuthSessionMode.BLUETOOTH_ONLY)
-        assertEquals(com.example.model.AuthSessionMode.BLUETOOTH_ONLY, store.getAuthSessionMode())
+        store.setAuthSessionMode(AuthSessionMode.BLUETOOTH_ONLY)
+        assertEquals(AuthSessionMode.BLUETOOTH_ONLY, store.getAuthSessionMode())
 
-        store.setAuthSessionMode(com.example.model.AuthSessionMode.GUEST_LOCAL)
-        assertEquals(com.example.model.AuthSessionMode.GUEST_LOCAL, store.getAuthSessionMode())
+        store.setAuthSessionMode(AuthSessionMode.GUEST_LOCAL)
+        assertEquals(AuthSessionMode.GUEST_LOCAL, store.getAuthSessionMode())
 
-        val customActive = listOf(com.example.model.QuickToolId.DPAD, com.example.model.QuickToolId.ENTER)
-        val customPool = listOf(com.example.model.QuickToolId.SPACE, com.example.model.QuickToolId.TR_CCEDIL)
+        val customActive = listOf(QuickToolId.DPAD, QuickToolId.ENTER)
+        val customPool = listOf(QuickToolId.SPACE, QuickToolId.TR_CCEDIL, QuickToolId.ESC)
+        val customColor = 0xFF4BE3B0.toInt()
+        val customOffsets = GamepadLayoutOffsets(
+            dpadX = 0.12f,
+            dpadY = -0.08f,
+            leftStickX = 0.04f,
+            leftStickY = 0.16f,
+            faceButtonsX = -0.20f,
+            faceButtonsY = 0.05f,
+            rightStickX = -0.06f,
+            rightStickY = -0.12f,
+            centerPadX = 0.03f,
+            centerPadY = 0.09f
+        )
+        val customPlacements = listOf(
+            QuickToolPlacement(QuickToolId.DPAD, col = 0, row = 0, colSpan = 3, rowSpan = 2),
+            QuickToolPlacement(QuickToolId.ENTER, col = 4, row = 1, colSpan = 2, rowSpan = 1)
+        )
+        val customWifiWidgets = listOf(
+            WifiWidgetPlacement(WifiQuickWidgetId.PLAY_PAUSE, col = 0, row = 0, colSpan = 2, rowSpan = 1),
+            WifiWidgetPlacement(WifiQuickWidgetId.SCREENSHOT, col = 3, row = 1, colSpan = 2, rowSpan = 1)
+        )
         store.saveSettings(
             RemoteSettings(
                 quickToolsActiveOrder = customActive,
                 quickToolsPoolOrder = customPool,
-                liveTypingMode = false
+                quickToolsPlacements = customPlacements,
+                wifiControlPlacements = customWifiWidgets,
+                liveTypingMode = false,
+                themePreset = ThemePreset.EMERALD,
+                useDynamicColor = true,
+                cursorScale = 1.6f,
+                cursorColorArgb = customColor,
+                cursorBorderColorArgb = 0xFF101218.toInt(),
+                cursorContrastMode = CursorContrastMode.GRADUAL_ADAPTIVE,
+                gamepadOffsets = customOffsets,
+                horizontalPanPosition = HorizontalPanPosition.BELOW_BUTTONS,
+                buttonPosition = ButtonPosition.TOP
             )
         )
         val reloaded = store.loadSettings()
         assertEquals(customActive, reloaded.quickToolsActiveOrder)
         assertTrue(reloaded.quickToolsPoolOrder.containsAll(customPool))
+        assertEquals(customPlacements, reloaded.quickToolsPlacements)
+        assertEquals(customWifiWidgets, reloaded.wifiControlPlacements)
         assertFalse(reloaded.liveTypingMode)
+        assertEquals(ThemePreset.EMERALD, reloaded.themePreset)
+        assertTrue(reloaded.useDynamicColor)
+        assertEquals(1.6f, reloaded.cursorScale, 0.01f)
+        assertEquals(customColor, reloaded.cursorColorArgb)
+        assertEquals(0xFF101218.toInt(), reloaded.cursorBorderColorArgb)
+        assertEquals(CursorContrastMode.GRADUAL_ADAPTIVE, reloaded.cursorContrastMode)
+        assertEquals(customOffsets, reloaded.gamepadOffsets)
+        assertEquals(HorizontalPanPosition.BELOW_BUTTONS, reloaded.horizontalPanPosition)
+        assertEquals(ButtonPosition.BOTTOM, reloaded.buttonPosition)
+    }
+
+    @Test
+    fun `verify SparseGridEngine preserves empty gaps and pushes colliding tiles to nearest open slot`() {
+        val initial = listOf(
+            SparseCell(QuickToolId.ESC, col = 0, row = 0, colSpan = 1, rowSpan = 1),
+            SparseCell(QuickToolId.ENTER, col = 3, row = 0, colSpan = 2, rowSpan = 1)
+        )
+        // Drop TAB at col=3,row=0 onto ENTER -> ENTER should slide cleanly without compacting gap at col=1..2
+        val updated = SparseGridEngine.placeWithPush(
+            cells = initial + SparseCell(QuickToolId.TAB, col = 5, row = 0, colSpan = 1, rowSpan = 1),
+            targetId = QuickToolId.TAB,
+            targetCol = 3,
+            targetRow = 0,
+            targetColSpan = 1,
+            targetRowSpan = 1
+        )
+        val esc = updated.first { it.id == QuickToolId.ESC }
+        val tab = updated.first { it.id == QuickToolId.TAB }
+        val enter = updated.first { it.id == QuickToolId.ENTER }
+
+        assertEquals(0, esc.col)
+        assertEquals(0, esc.row)
+        assertEquals(3, tab.col)
+        assertEquals(0, tab.row)
+        // ENTER was colliding with (3,0), so it must not overlap (3,0) or (0,0)
+        assertFalse(enter.row == 0 && enter.col == 3)
+        assertFalse(enter.row == 0 && enter.col == 0)
+    }
+
+    @Test
+    fun `verify QuickToolId nextSpan toggles 1x1 and 2x1 and keeps Turkish and punctuation fixed 1x1`() {
+        assertEquals(2 to 1, QuickToolId.ESC.nextSpan(1, 1))
+        assertEquals(1 to 1, QuickToolId.ESC.nextSpan(2, 1))
+        assertEquals(1 to 1, QuickToolId.SPACE.nextSpan(2, 1))
+        assertEquals(2 to 1, QuickToolId.SPACE.nextSpan(1, 1))
+        assertEquals(3 to 2, QuickToolId.DPAD.nextSpan(3, 2))
+
+        assertEquals(listOf(1 to 1), QuickToolId.TR_CCEDIL.allowedSpans())
+        assertEquals(1 to 1, QuickToolId.TR_CCEDIL.nextSpan(1, 1))
+        assertEquals(listOf(1 to 1), QuickToolId.PUNCT_COMMA.allowedSpans())
+        assertEquals(1 to 1, QuickToolId.PUNCT_DOT.nextSpan(1, 1))
+    }
+
+    @Test
+    fun `verify 4-tab NavTab and 4 InputSubMode entries`() {
+        assertEquals(
+            listOf(NavTab.TOUCHPAD, NavTab.KEYBOARD, NavTab.CONTROL_HUB, NavTab.SETTINGS),
+            NavTab.entries
+        )
+        assertEquals(
+            listOf(
+                InputSubMode.HUB_HOME,
+                InputSubMode.PC_KEYBOARD,
+                InputSubMode.TV_REMOTE,
+                InputSubMode.GAMEPAD
+            ),
+            InputSubMode.entries
+        )
+    }
+
+    @Test
+    fun `verify cursor contrast modes resolve manual, instant BW, and gradual adaptive colors`() {
+        val fill = 0xFF33AAFF.toInt()
+        val border = AndroidColor.BLACK
+
+        assertEquals(
+            fill to border,
+            RemoteAccessibilityService.resolveEffectiveCursorColors(
+                fill, border, CursorContrastMode.MANUAL, backgroundLuminance = 0.92f
+            )
+        )
+
+        val instantOnWhite = RemoteAccessibilityService.resolveEffectiveCursorColors(
+            fill, border, CursorContrastMode.INSTANT_BW, backgroundLuminance = 0.9f
+        )
+        val instantOnBlack = RemoteAccessibilityService.resolveEffectiveCursorColors(
+            fill, border, CursorContrastMode.INSTANT_BW, backgroundLuminance = 0.1f
+        )
+        assertNotEquals(instantOnWhite.first, instantOnBlack.first)
+        assertEquals(AndroidColor.WHITE, instantOnWhite.second)
+        assertEquals(AndroidColor.WHITE, instantOnBlack.first)
+
+        val midGradual = RemoteAccessibilityService.resolveEffectiveCursorColors(
+            fill, border, CursorContrastMode.GRADUAL_ADAPTIVE, backgroundLuminance = 0.5f
+        )
+        assertNotEquals(midGradual.first, AndroidColor.WHITE)
+        assertNotEquals(midGradual.first, 0xFF14161B.toInt())
     }
 }
-

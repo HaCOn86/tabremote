@@ -31,9 +31,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -54,14 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.BackgroundPitch
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.SurfaceContainerCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.TabRemoteTheme
 
 /**
  * Top transparent-status-bar scrim so scrolling content fades organically behind the system clock/icons
@@ -72,6 +65,7 @@ fun StatusBarGlassScrim(
     topInsetHeight: Dp,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     val totalHeight = topInsetHeight + 18.dp
     Box(
         modifier = modifier
@@ -80,8 +74,8 @@ fun StatusBarGlassScrim(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        BackgroundPitch.copy(alpha = 0.86f),
-                        BackgroundPitch.copy(alpha = 0.42f),
+                        palette.background.copy(alpha = 0.86f),
+                        palette.background.copy(alpha = 0.42f),
                         Color.Transparent
                     )
                 )
@@ -190,6 +184,7 @@ fun <T> DockOrderEditorPanel(
     onDone: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     AnimatedVisibility(
         visible = visible,
         enter = expandVertically(tween(220)) + fadeIn(tween(150)),
@@ -197,11 +192,11 @@ fun <T> DockOrderEditorPanel(
         modifier = modifier
     ) {
         Surface(
-            color = SurfaceCharcoal,
-            shape = RoundedCornerShape(12.dp),
+            color = palette.surface,
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.2.dp, RubyPrimary.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                .border(1.2.dp, palette.primary.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
                 .animateContentSize()
         ) {
             Column(
@@ -215,13 +210,13 @@ fun <T> DockOrderEditorPanel(
                 ) {
                     Text(
                         text = title,
-                        color = RubyPrimary,
+                        color = palette.primary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.6.sp
                     )
                     Surface(
-                        color = RubyPrimary,
+                        color = palette.primary,
                         shape = RoundedCornerShape(6.dp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -234,11 +229,11 @@ fun <T> DockOrderEditorPanel(
                             Icon(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = "Tamam",
-                                tint = Color.White,
+                                tint = palette.onAccent,
                                 modifier = Modifier.size(12.dp)
                             )
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("Bitti", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("Bitti", color = palette.onAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -251,11 +246,11 @@ fun <T> DockOrderEditorPanel(
                     orderedItems.forEachIndexed { idx, item ->
                         val isHidden = item in hiddenItems
                         Surface(
-                            color = if (isHidden) Color(0xFF141416) else SurfaceContainerCharcoal,
+                            color = if (isHidden) palette.shadedPanel else palette.surfaceContainer,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.border(
                                 1.dp,
-                                if (isHidden) SurfaceBorderRuby.copy(alpha = 0.4f) else RubyPrimary.copy(alpha = 0.45f),
+                                if (isHidden) palette.borderAccent.copy(alpha = 0.4f) else palette.primary.copy(alpha = 0.45f),
                                 RoundedCornerShape(8.dp)
                             )
                         ) {
@@ -271,14 +266,14 @@ fun <T> DockOrderEditorPanel(
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                             contentDescription = "Sola Taşı",
-                                            tint = RubyPrimary,
+                                            tint = palette.primary,
                                             modifier = Modifier.size(13.dp)
                                         )
                                     }
                                 }
                                 Text(
                                     text = labelOf(item),
-                                    color = if (isHidden) TextMuted else TextPrimary,
+                                    color = if (isHidden) palette.textMuted else palette.textPrimary,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 4.dp)
@@ -289,10 +284,10 @@ fun <T> DockOrderEditorPanel(
                                         modifier = Modifier.size(26.dp)
                                     ) {
                                         Icon(
-                                            imageVector = if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                            contentDescription = if (isHidden) "Göster" else "Gizle",
-                                            tint = if (isHidden) TextMuted else TextSecondary,
-                                            modifier = Modifier.size(13.dp)
+                                            imageVector = if (isHidden) Icons.Default.Add else Icons.Default.Remove,
+                                            contentDescription = if (isHidden) "Ekle" else "Gizle",
+                                            tint = if (isHidden) palette.primary else palette.textSecondary,
+                                            modifier = Modifier.size(14.dp)
                                         )
                                     }
                                 }
@@ -304,7 +299,7 @@ fun <T> DockOrderEditorPanel(
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                             contentDescription = "Sağa Taşı",
-                                            tint = RubyPrimary,
+                                            tint = palette.primary,
                                             modifier = Modifier.size(13.dp)
                                         )
                                     }

@@ -15,15 +15,13 @@
     <!-- Bluetooth permissions for API 31+ -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-    <uses-permission
-        android:name="android.permission.BLUETOOTH_SCAN"
-        android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- Legacy Bluetooth permissions for API <= 30 -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
 
     <!-- Haptic feedback -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -74,6 +72,17 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/remote_accessibility_config" />
+        </service>
+
+        <service
+            android:name=".accessibility.RemoteMediaNotificationService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
     </application>
 

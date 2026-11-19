@@ -13,9 +13,11 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,21 +34,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,29 +63,21 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.bluetooth.HidConstants
-import com.example.bluetooth.TouchContact
+import androidx.compose.ui.zIndex
+import com.example.model.GamepadLayoutOffsets
 import com.example.model.GamepadStyle
-import com.example.model.HidProfileMode
-import com.example.ui.theme.BackgroundPitch
+import com.example.ui.components.ReceiverLockedControlContainer
 import com.example.ui.theme.GreenSuccess
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.SurfaceContainerCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
-import com.example.ui.theme.TrackpadGridDot
-import com.example.ui.theme.TrackpadSurface
+import com.example.ui.theme.TabRemoteTheme
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -104,25 +103,35 @@ private object PadBtn {
 
 private enum class PsSymbol { TRIANGLE, CIRCLE, CROSS, SQUARE }
 
+private enum class GamepadModuleId {
+    DPAD,
+    LEFT_STICK,
+    FACE_BUTTONS,
+    RIGHT_STICK,
+    CENTER_PAD
+}
+
 @Composable
 fun GamepadScreenContent(
     gamepadStyle: GamepadStyle,
-    hidProfileMode: HidProfileMode,
-    isWifiMode: Boolean = false,
+    gamepadOffsets: GamepadLayoutOffsets = GamepadLayoutOffsets(),
     swapLeftWing: Boolean = false,
     swapRightWing: Boolean = false,
     mirrorHands: Boolean = false,
+    isReceiverLocked: Boolean = false,
     onToggleStyle: () -> Unit,
+    onUpdateOffsets: ((GamepadLayoutOffsets) -> GamepadLayoutOffsets) -> Unit = {},
+    onResetLayout: () -> Unit = {},
     onToggleSwapLeftWing: () -> Unit = {},
     onToggleSwapRightWing: () -> Unit = {},
     onToggleMirrorHands: () -> Unit = {},
     onExitFullscreen: () -> Unit,
     onGamepadState: (buttonsMask: Int, hat: Int, lx: Int, ly: Int, rx: Int, ry: Int) -> Unit,
-    onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
     onTrackpadTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     var buttonsMask by remember { mutableIntStateOf(0) }
     var hatSwitch by remember { mutableIntStateOf(8) }
     var lx by remember { mutableIntStateOf(0) }
@@ -130,6 +139,11 @@ fun GamepadScreenContent(
     var rx by remember { mutableIntStateOf(0) }
     var ry by remember { mutableIntStateOf(0) }
     var showLayoutEditor by remember { mutableStateOf(false) }
+
+    var localOffsets by remember { mutableStateOf(gamepadOffsets) }
+    LaunchedEffect(gamepadOffsets) {
+        localOffsets = gamepadOffsets
+    }
 
     fun pushState() {
         onGamepadState(buttonsMask, hatSwitch, lx, ly, rx, ry)
@@ -145,12 +159,11 @@ fun GamepadScreenContent(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(BackgroundPitch)
-            .padding(horizontal = 10.dp, vertical = 4.dp)
-            .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+            .background(palette.background)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // Top Shoulder Triggers Row (PS5/XBOX toggle fixed width 82.dp so shoulders NEVER jump!)
+        // Symmetric Top Shoulder Triggers & System Row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -162,42 +175,43 @@ fun GamepadScreenContent(
                 label = if (isPs) "L2" else "LT",
                 pressed = (buttonsMask and PadBtn.L2_LT) != 0,
                 onStateChange = { setButtonPressed(PadBtn.L2_LT, it) },
-                modifier = Modifier.weight(0.95f)
+                modifier = Modifier.weight(1f)
             )
             ShoulderTriggerButton(
                 label = if (isPs) "L1" else "LB",
                 pressed = (buttonsMask and PadBtn.L1_LB) != 0,
                 onStateChange = { setButtonPressed(PadBtn.L1_LB, it) },
-                modifier = Modifier.weight(0.95f)
+                modifier = Modifier.weight(1f)
             )
 
-            // Fixed 82.dp Width PS5 / XBOX Style Toggle
             Surface(
-                color = SurfaceCharcoal,
+                color = palette.surface,
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
-                    .width(82.dp)
+                    .width(78.dp)
                     .fillMaxHeight()
-                    .border(1.dp, RubyPrimary.copy(alpha = 0.65f), RoundedCornerShape(8.dp))
                     .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, palette.borderSubtle, RoundedCornerShape(8.dp))
                     .clickable { onToggleStyle() }
                     .testTag("gamepad_style_switch")
             ) {
                 Row(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 6.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Gamepad,
                         contentDescription = "Stil Değiştir",
-                        tint = RubyPrimary,
+                        tint = palette.textPrimary,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = if (isPs) "PS5" else "XBOX",
-                        color = RubyPrimary,
+                        color = palette.textPrimary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
                         softWrap = false,
@@ -210,16 +224,20 @@ fun GamepadScreenContent(
                 label = if (isPs) "SHARE" else "VIEW",
                 pressed = (buttonsMask and PadBtn.SELECT_VIEW) != 0,
                 onStateChange = { setButtonPressed(PadBtn.SELECT_VIEW, it) },
-                modifier = Modifier.weight(0.8f)
+                modifier = Modifier.weight(0.85f)
             )
 
-            // Center Home Jewel
+            val homePressed = (buttonsMask and PadBtn.HOME) != 0
             Surface(
-                color = if ((buttonsMask and PadBtn.HOME) != 0) RubyPrimary else SurfaceCharcoal,
+                color = if (homePressed) palette.primary else palette.surface,
                 shape = CircleShape,
                 modifier = Modifier
                     .size(38.dp)
-                    .border(1.4.dp, RubyPrimary, CircleShape)
+                    .border(
+                        1.2.dp,
+                        if (homePressed) palette.primary else palette.borderElevated,
+                        CircleShape
+                    )
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onPress = {
@@ -234,7 +252,7 @@ fun GamepadScreenContent(
                     Icon(
                         imageVector = Icons.Default.Home,
                         contentDescription = "Console Home",
-                        tint = if ((buttonsMask and PadBtn.HOME) != 0) Color.White else RubyPrimary,
+                        tint = if (homePressed) palette.onAccent else palette.textPrimary,
                         modifier = Modifier.size(17.dp)
                     )
                 }
@@ -244,67 +262,41 @@ fun GamepadScreenContent(
                 label = if (isPs) "OPT" else "MENU",
                 pressed = (buttonsMask and PadBtn.START_MENU) != 0,
                 onStateChange = { setButtonPressed(PadBtn.START_MENU, it) },
-                modifier = Modifier.weight(0.8f)
+                modifier = Modifier.weight(0.85f)
             )
 
-            // Wing / Analog Layout Customization Toggle
             Surface(
-                color = if (showLayoutEditor) RubyPrimary else SurfaceCharcoal,
+                color = palette.surface,
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
-                    .width(74.dp)
+                    .width(78.dp)
                     .fillMaxHeight()
-                    .border(1.dp, if (showLayoutEditor) RubyPrimary else SurfaceBorderRuby, RoundedCornerShape(8.dp))
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { showLayoutEditor = !showLayoutEditor }
-                    .testTag("gamepad_layout_edit_btn")
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = "Yerleşim Düzenle",
-                        tint = if (showLayoutEditor) Color.White else RubyPrimary,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "DÜZEN",
-                        color = if (showLayoutEditor) Color.White else RubyPrimary,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        softWrap = false
-                    )
-                }
-            }
-
-            Surface(
-                color = RubyPrimary.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .width(72.dp)
-                    .fillMaxHeight()
-                    .border(1.dp, RubyPrimary, RoundedCornerShape(8.dp))
-                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, palette.borderSubtle, RoundedCornerShape(8.dp))
                     .clickable { onExitFullscreen() }
                     .testTag("gamepad_exit_btn")
             ) {
                 Row(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 6.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.FullscreenExit,
                         contentDescription = "Çıkış",
-                        tint = RubyPrimary,
+                        tint = palette.textPrimary,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(3.dp))
-                    Text("ÇIKIŞ", color = RubyPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold, softWrap = false)
+                    Text(
+                        text = "ÇIKIŞ",
+                        color = palette.textPrimary,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        softWrap = false
+                    )
                 }
             }
 
@@ -312,210 +304,453 @@ fun GamepadScreenContent(
                 label = if (isPs) "R1" else "RB",
                 pressed = (buttonsMask and PadBtn.R1_RB) != 0,
                 onStateChange = { setButtonPressed(PadBtn.R1_RB, it) },
-                modifier = Modifier.weight(0.95f)
+                modifier = Modifier.weight(1f)
             )
             ShoulderTriggerButton(
                 label = if (isPs) "R2" else "RT",
                 pressed = (buttonsMask and PadBtn.R2_RT) != 0,
                 onStateChange = { setButtonPressed(PadBtn.R2_RT, it) },
-                modifier = Modifier.weight(0.95f)
+                modifier = Modifier.weight(1f)
             )
         }
 
-        // Animated Gamepad Wing & Stick Position Customizer
-        AnimatedVisibility(
-            visible = showLayoutEditor,
-            enter = expandVertically(tween(200)) + fadeIn(tween(150)),
-            exit = shrinkVertically(tween(180)) + fadeOut(tween(120))
+        // Free-Drag Dual-Analog Gamepad Arena (wrapped in ReceiverLockedControlContainer when in Receiver role)
+        val density = LocalDensity.current
+        ReceiverLockedControlContainer(
+            isLockedForReceiver = isReceiverLocked && !showLayoutEditor,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
         ) {
-            Row(
+            BoxWithConstraints(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SurfaceCharcoal, RoundedCornerShape(10.dp))
-                    .border(1.dp, RubyPrimary.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxSize()
+                    .testTag("gamepad_free_arena")
             ) {
-                LayoutSwapChip(
-                    label = "Sol Analog ⇄ D-Pad",
-                    active = swapLeftWing,
-                    onClick = onToggleSwapLeftWing,
-                    modifier = Modifier.weight(1f)
-                )
-                LayoutSwapChip(
-                    label = "Sağ Analog ⇄ Aksiyon",
-                    active = swapRightWing,
-                    onClick = onToggleSwapRightWing,
-                    modifier = Modifier.weight(1f)
-                )
-                LayoutSwapChip(
-                    label = "Sol / Sağ Kanat Ters",
-                    active = mirrorHands,
-                    onClick = onToggleMirrorHands,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
+                val arenaWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(320f)
+                val arenaHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(180f)
 
-        val leftWingContent: @Composable () -> Unit = {
-            // Effective order flips Xbox <-> PS or user's manual swapLeftWing
-            val dpadOnTop = if (isPs) !swapLeftWing else swapLeftWing
-            Column(
-                modifier = Modifier
-                    .weight(1.1f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.SpaceEvenly,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                if (dpadOnTop) {
+                val dpadSizePx = with(density) { 116.dp.toPx() }.coerceAtMost(arenaHeightPx * 0.46f)
+                val stickSizePx = with(density) { 110.dp.toPx() }.coerceAtMost(arenaHeightPx * 0.44f)
+                val faceSizePx = with(density) { 124.dp.toPx() }.coerceAtMost(arenaHeightPx * 0.48f)
+                val centerW = (arenaWidthPx * 0.36f).coerceIn(172f, 360f)
+                val centerH = (arenaHeightPx * 0.62f).coerceIn(118f, 248f)
+
+                val leftWingIsDpadTop = if (isPs) !swapLeftWing else swapLeftWing
+                val edgePadPx = with(density) { 12.dp.toPx() }
+                val leftColX = if (mirrorHands) arenaWidthPx - dpadSizePx - edgePadPx else edgePadPx
+                val rightColX = if (mirrorHands) edgePadPx else arenaWidthPx - faceSizePx - edgePadPx
+
+                val topRowY = (arenaHeightPx * 0.04f)
+                val botRowY = (arenaHeightPx - stickSizePx - with(density) { 6.dp.toPx() }).coerceAtLeast(topRowY + dpadSizePx + 6f)
+
+                val innerStepPx = with(density) { 42.dp.toPx() }
+                val baseDpad = Offset(
+                    x = if (leftWingIsDpadTop) leftColX else if (mirrorHands) leftColX - innerStepPx else leftColX + innerStepPx,
+                    y = if (leftWingIsDpadTop) topRowY else botRowY
+                )
+                val baseLeftStick = Offset(
+                    x = if (!leftWingIsDpadTop) leftColX else if (mirrorHands) leftColX - innerStepPx else leftColX + innerStepPx,
+                    y = if (!leftWingIsDpadTop) topRowY else botRowY
+                )
+                val baseFace = Offset(
+                    x = if (!swapRightWing) rightColX else if (mirrorHands) rightColX + innerStepPx else rightColX - innerStepPx,
+                    y = if (!swapRightWing) topRowY else botRowY
+                )
+                val baseRightStick = Offset(
+                    x = if (swapRightWing) rightColX else if (mirrorHands) rightColX + innerStepPx else rightColX - innerStepPx,
+                    y = if (swapRightWing) topRowY else botRowY
+                )
+                val baseCenterPad = Offset(
+                    x = (arenaWidthPx - centerW) / 2f,
+                    y = (arenaHeightPx - centerH) * 0.40f
+                )
+
+                fun clampedPixelPos(base: Offset, offXFrac: Float, offYFrac: Float, modW: Float, modH: Float): Offset {
+                    val x = (base.x + offXFrac * arenaWidthPx).coerceIn(0f, (arenaWidthPx - modW).coerceAtLeast(0f))
+                    val y = (base.y + offYFrac * arenaHeightPx).coerceIn(0f, (arenaHeightPx - modH).coerceAtLeast(0f))
+                    return Offset(x, y)
+                }
+
+                val dpadPos = clampedPixelPos(baseDpad, localOffsets.dpadX, localOffsets.dpadY, dpadSizePx, dpadSizePx)
+                val lStickPos = clampedPixelPos(baseLeftStick, localOffsets.leftStickX, localOffsets.leftStickY, stickSizePx, stickSizePx)
+                val cPadPos = clampedPixelPos(baseCenterPad, localOffsets.centerPadX, localOffsets.centerPadY, centerW, centerH)
+                val rStickPos = clampedPixelPos(baseRightStick, localOffsets.rightStickX, localOffsets.rightStickY, stickSizePx, stickSizePx)
+                val facePos = clampedPixelPos(baseFace, localOffsets.faceButtonsX, localOffsets.faceButtonsY, faceSizePx, faceSizePx)
+
+                var activeDragModule by remember { mutableStateOf<GamepadModuleId?>(null) }
+
+                val latestDpadPos by rememberUpdatedState(dpadPos)
+                val latestLStickPos by rememberUpdatedState(lStickPos)
+                val latestCPadPos by rememberUpdatedState(cPadPos)
+                val latestRStickPos by rememberUpdatedState(rStickPos)
+                val latestFacePos by rememberUpdatedState(facePos)
+                val latestBaseDpad by rememberUpdatedState(baseDpad)
+                val latestBaseLStick by rememberUpdatedState(baseLeftStick)
+                val latestBaseCPad by rememberUpdatedState(baseCenterPad)
+                val latestBaseRStick by rememberUpdatedState(baseRightStick)
+                val latestBaseFace by rememberUpdatedState(baseFace)
+                val latestArenaW by rememberUpdatedState(arenaWidthPx)
+                val latestArenaH by rememberUpdatedState(arenaHeightPx)
+                val latestOnUpdateOffsets by rememberUpdatedState(onUpdateOffsets)
+
+                // 1. D-Pad Module
+                val dpadSizeDp = with(density) { dpadSizePx.toDp() }
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(dpadPos.x.roundToInt(), dpadPos.y.roundToInt()) }
+                        .size(dpadSizeDp)
+                        .then(
+                            if (showLayoutEditor) {
+                                Modifier.border(
+                                    if (activeDragModule == GamepadModuleId.DPAD) 2.dp else 1.5.dp,
+                                    palette.primary,
+                                    CircleShape
+                                )
+                            } else Modifier
+                        )
+                ) {
                     CrossDPad(
                         currentHat = hatSwitch,
+                        enabled = !showLayoutEditor && !isReceiverLocked,
                         onHatChange = { hatSwitch = it; pushState() },
-                        modifier = Modifier.size(124.dp)
+                        modifier = Modifier.fillMaxSize()
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = if (mirrorHands) Arrangement.Start else Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        VirtualAnalogStick(
-                            label = if (isPs) "L" else "LS",
-                            onStickMove = { sx, sy -> lx = sx; ly = sy; pushState() },
-                            onStickRelease = { lx = 0; ly = 0; pushState() },
-                            modifier = Modifier.size(116.dp).testTag("gamepad_left_stick")
+                }
+
+                // 2. Left Analog Stick Module
+                val stickSizeDp = with(density) { stickSizePx.toDp() }
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(lStickPos.x.roundToInt(), lStickPos.y.roundToInt()) }
+                        .size(stickSizeDp)
+                        .then(
+                            if (showLayoutEditor) {
+                                Modifier.border(
+                                    if (activeDragModule == GamepadModuleId.LEFT_STICK) 2.dp else 1.5.dp,
+                                    palette.primary,
+                                    CircleShape
+                                )
+                            } else Modifier
                         )
-                    }
-                } else {
+                ) {
                     VirtualAnalogStick(
                         label = if (isPs) "L" else "LS",
+                        enabled = !showLayoutEditor && !isReceiverLocked,
                         onStickMove = { sx, sy -> lx = sx; ly = sy; pushState() },
                         onStickRelease = { lx = 0; ly = 0; pushState() },
-                        modifier = Modifier.size(120.dp).testTag("gamepad_left_stick")
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("gamepad_left_stick")
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = if (mirrorHands) Arrangement.Start else Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CrossDPad(
-                            currentHat = hatSwitch,
-                            onHatChange = { hatSwitch = it; pushState() },
-                            modifier = Modifier.size(116.dp)
-                        )
-                    }
                 }
-            }
-        }
 
-        val rightWingContent: @Composable () -> Unit = {
-            Column(
-                modifier = Modifier
-                    .weight(1.1f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.SpaceEvenly,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                val faceDiamond: @Composable () -> Unit = {
+                // 3. Center Console Touchpad Module
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(cPadPos.x.roundToInt(), cPadPos.y.roundToInt()) }
+                        .size(with(density) { centerW.toDp() }, with(density) { centerH.toDp() })
+                        .then(
+                            if (showLayoutEditor) {
+                                Modifier.border(
+                                    if (activeDragModule == GamepadModuleId.CENTER_PAD) 2.dp else 1.5.dp,
+                                    palette.primary,
+                                    RoundedCornerShape(14.dp)
+                                )
+                            } else Modifier
+                        )
+                ) {
+                    ConsoleTouchpadSurface(
+                        title = if (isPs) "WI-FI DUALSENSE TOUCHPAD" else "WI-FI TOUCHPAD",
+                        enabled = !showLayoutEditor && !isReceiverLocked,
+                        onTrackpadDrag = onTrackpadDrag,
+                        onTrackpadTap = onTrackpadTap,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("gamepad_center_touchpad")
+                    )
+                }
+
+                // 4. Right Analog Stick Module
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(rStickPos.x.roundToInt(), rStickPos.y.roundToInt()) }
+                        .size(stickSizeDp)
+                        .then(
+                            if (showLayoutEditor) {
+                                Modifier.border(
+                                    if (activeDragModule == GamepadModuleId.RIGHT_STICK) 2.dp else 1.5.dp,
+                                    palette.primary,
+                                    CircleShape
+                                )
+                            } else Modifier
+                        )
+                ) {
+                    VirtualAnalogStick(
+                        label = if (isPs) "R" else "RS",
+                        enabled = !showLayoutEditor && !isReceiverLocked,
+                        onStickMove = { sx, sy -> rx = sx; ry = sy; pushState() },
+                        onStickRelease = { rx = 0; ry = 0; pushState() },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("gamepad_right_stick")
+                    )
+                }
+
+                // 5. Face Action Buttons Diamond
+                val faceSizeDp = with(density) { faceSizePx.toDp() }
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(facePos.x.roundToInt(), facePos.y.roundToInt()) }
+                        .size(faceSizeDp)
+                        .then(
+                            if (showLayoutEditor) {
+                                Modifier.border(
+                                    if (activeDragModule == GamepadModuleId.FACE_BUTTONS) 2.dp else 1.5.dp,
+                                    palette.primary,
+                                    RoundedCornerShape(18.dp)
+                                )
+                            } else Modifier
+                        )
+                ) {
                     if (isPs) {
                         PlayStationSymbolDiamond(
                             buttonsMask = buttonsMask,
+                            enabled = !showLayoutEditor && !isReceiverLocked,
                             onButtonState = { bit, down -> setButtonPressed(bit, down) },
-                            modifier = Modifier.size(132.dp)
+                            modifier = Modifier.fillMaxSize()
                         )
                     } else {
                         XboxAbxyDiamond(
                             buttonsMask = buttonsMask,
+                            enabled = !showLayoutEditor && !isReceiverLocked,
                             onButtonState = { bit, down -> setButtonPressed(bit, down) },
-                            modifier = Modifier.size(132.dp)
-                        )
-                    }
-                }
-                val rightStick: @Composable () -> Unit = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = if (mirrorHands) Arrangement.End else Arrangement.Start,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        VirtualAnalogStick(
-                            label = if (isPs) "R" else "RS",
-                            onStickMove = { sx, sy -> rx = sx; ry = sy; pushState() },
-                            onStickRelease = { rx = 0; ry = 0; pushState() },
-                            modifier = Modifier.size(116.dp).testTag("gamepad_right_stick")
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                 }
 
-                if (!swapRightWing) {
-                    faceDiamond()
-                    rightStick()
-                } else {
-                    rightStick()
-                    faceDiamond()
+                // Parent-coordinate drag overlay (zero oscillation/jitter when dragging)
+                if (showLayoutEditor) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(25f)
+                            .pointerInput(showLayoutEditor, dpadSizePx, stickSizePx, faceSizePx, centerW, centerH) {
+                                detectDragGestures(
+                                    onDragStart = { startOffset ->
+                                        fun hit(pos: Offset, w: Float, h: Float): Boolean =
+                                            startOffset.x >= pos.x && startOffset.x <= pos.x + w &&
+                                                startOffset.y >= pos.y && startOffset.y <= pos.y + h
+
+                                        activeDragModule = when {
+                                            hit(latestFacePos, faceSizePx, faceSizePx) -> GamepadModuleId.FACE_BUTTONS
+                                            hit(latestRStickPos, stickSizePx, stickSizePx) -> GamepadModuleId.RIGHT_STICK
+                                            hit(latestLStickPos, stickSizePx, stickSizePx) -> GamepadModuleId.LEFT_STICK
+                                            hit(latestDpadPos, dpadSizePx, dpadSizePx) -> GamepadModuleId.DPAD
+                                            hit(latestCPadPos, centerW, centerH) -> GamepadModuleId.CENTER_PAD
+                                            else -> null
+                                        }
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        val mod = activeDragModule ?: return@detectDragGestures
+                                        change.consume()
+                                        val aw = latestArenaW.coerceAtLeast(1f)
+                                        val ah = latestArenaH.coerceAtLeast(1f)
+                                        val dxFrac = dragAmount.x / aw
+                                        val dyFrac = dragAmount.y / ah
+                                        val cur = localOffsets
+                                        localOffsets = when (mod) {
+                                            GamepadModuleId.DPAD -> {
+                                                val b = latestBaseDpad
+                                                val nx = ((b.x + (cur.dpadX + dxFrac) * aw).coerceIn(0f, (aw - dpadSizePx).coerceAtLeast(0f)) - b.x) / aw
+                                                val ny = ((b.y + (cur.dpadY + dyFrac) * ah).coerceIn(0f, (ah - dpadSizePx).coerceAtLeast(0f)) - b.y) / ah
+                                                cur.copy(dpadX = nx, dpadY = ny)
+                                            }
+                                            GamepadModuleId.LEFT_STICK -> {
+                                                val b = latestBaseLStick
+                                                val nx = ((b.x + (cur.leftStickX + dxFrac) * aw).coerceIn(0f, (aw - stickSizePx).coerceAtLeast(0f)) - b.x) / aw
+                                                val ny = ((b.y + (cur.leftStickY + dyFrac) * ah).coerceIn(0f, (ah - stickSizePx).coerceAtLeast(0f)) - b.y) / ah
+                                                cur.copy(leftStickX = nx, leftStickY = ny)
+                                            }
+                                            GamepadModuleId.FACE_BUTTONS -> {
+                                                val b = latestBaseFace
+                                                val nx = ((b.x + (cur.faceButtonsX + dxFrac) * aw).coerceIn(0f, (aw - faceSizePx).coerceAtLeast(0f)) - b.x) / aw
+                                                val ny = ((b.y + (cur.faceButtonsY + dyFrac) * ah).coerceIn(0f, (ah - faceSizePx).coerceAtLeast(0f)) - b.y) / ah
+                                                cur.copy(faceButtonsX = nx, faceButtonsY = ny)
+                                            }
+                                            GamepadModuleId.RIGHT_STICK -> {
+                                                val b = latestBaseRStick
+                                                val nx = ((b.x + (cur.rightStickX + dxFrac) * aw).coerceIn(0f, (aw - stickSizePx).coerceAtLeast(0f)) - b.x) / aw
+                                                val ny = ((b.y + (cur.rightStickY + dyFrac) * ah).coerceIn(0f, (ah - stickSizePx).coerceAtLeast(0f)) - b.y) / ah
+                                                cur.copy(rightStickX = nx, rightStickY = ny)
+                                            }
+                                            GamepadModuleId.CENTER_PAD -> {
+                                                val b = latestBaseCPad
+                                                val nx = ((b.x + (cur.centerPadX + dxFrac) * aw).coerceIn(0f, (aw - centerW).coerceAtLeast(0f)) - b.x) / aw
+                                                val ny = ((b.y + (cur.centerPadY + dyFrac) * ah).coerceIn(0f, (ah - centerH).coerceAtLeast(0f)) - b.y) / ah
+                                                cur.copy(centerPadX = nx, centerPadY = ny)
+                                            }
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        activeDragModule = null
+                                        val committed = localOffsets
+                                        latestOnUpdateOffsets { committed }
+                                    },
+                                    onDragCancel = {
+                                        activeDragModule = null
+                                        val committed = localOffsets
+                                        latestOnUpdateOffsets { committed }
+                                    }
+                                )
+                            }
+                    )
+
+                    // Floating overlay editor bar (never changes arena height / never shifts controls)
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 4.dp)
+                            .zIndex(35f)
+                            .background(palette.surface.copy(alpha = 0.94f), RoundedCornerShape(10.dp))
+                            .border(1.dp, palette.primary.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Tuş gruplarını sürükleyip yerleştirin",
+                            color = palette.primary,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        LayoutSwapChip(
+                            label = "Sol Ters",
+                            active = swapLeftWing,
+                            onClick = onToggleSwapLeftWing
+                        )
+                        LayoutSwapChip(
+                            label = "Sağ Ters",
+                            active = swapRightWing,
+                            onClick = onToggleSwapRightWing
+                        )
+                        LayoutSwapChip(
+                            label = "Kanatlar",
+                            active = mirrorHands,
+                            onClick = onToggleMirrorHands
+                        )
+                    }
                 }
             }
         }
 
-        // Main Dual-Analog Console Body (Supports Mirrored Wings + Wing Swap)
-        Row(
+        // Bottom Bar: Fixed Bottom-Left DÜZEN (+ SIFIRLA) & Symmetrically Centered L3 | Telemetry | R3
+        BoxWithConstraints(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxWidth()
+                .height(34.dp)
         ) {
-            if (mirrorHands) {
-                rightWingContent()
+            val wideEnough = maxWidth >= 560.dp
+
+            if (wideEnough) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterStart),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GamepadEditTogglePill(
+                            showLayoutEditor = showLayoutEditor,
+                            onClick = { showLayoutEditor = !showLayoutEditor }
+                        )
+                        if (showLayoutEditor) {
+                            GamepadResetPill(
+                                onClick = {
+                                    localOffsets = GamepadLayoutOffsets()
+                                    onResetLayout()
+                                }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .fillMaxHeight(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ShoulderTriggerButton(
+                            label = "L3",
+                            pressed = (buttonsMask and PadBtn.L3) != 0,
+                            onStateChange = { if (!isReceiverLocked) setButtonPressed(PadBtn.L3, it) },
+                            modifier = Modifier.width(74.dp)
+                        )
+
+                        Surface(
+                            color = palette.surface,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .width(120.dp)
+                                .fillMaxHeight()
+                                .border(1.dp, palette.borderSubtle, RoundedCornerShape(8.dp))
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "L(${lx / 10},${ly / 10}) R(${rx / 10},${ry / 10})",
+                                    color = palette.textMuted,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        ShoulderTriggerButton(
+                            label = "R3",
+                            pressed = (buttonsMask and PadBtn.R3) != 0,
+                            onStateChange = { if (!isReceiverLocked) setButtonPressed(PadBtn.R3, it) },
+                            modifier = Modifier.width(74.dp)
+                        )
+                    }
+                }
             } else {
-                leftWingContent()
-            }
-
-            // CENTER BRIDGE
-            Column(
-                modifier = Modifier
-                    .weight(0.95f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                ConsoleTouchpadSurface(
-                    title = if (isPs) "DUALSENSE TOUCHPAD" else "TABLET TOUCHPAD",
-                    hidProfileMode = hidProfileMode,
-                    isWifiMode = isWifiMode,
-                    onTouchpadContacts = onTouchpadContacts,
-                    onTrackpadDrag = onTrackpadDrag,
-                    onTrackpadTap = onTrackpadTap,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .testTag("gamepad_center_touchpad")
-                )
-
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(34.dp),
+                    modifier = Modifier.fillMaxSize(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    GamepadEditTogglePill(
+                        showLayoutEditor = showLayoutEditor,
+                        onClick = { showLayoutEditor = !showLayoutEditor }
+                    )
+                    if (showLayoutEditor) {
+                        GamepadResetPill(
+                            onClick = {
+                                localOffsets = GamepadLayoutOffsets()
+                                onResetLayout()
+                            }
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(0.3f))
                     ShoulderTriggerButton(
                         label = "L3",
                         pressed = (buttonsMask and PadBtn.L3) != 0,
-                        onStateChange = { setButtonPressed(PadBtn.L3, it) },
-                        modifier = Modifier.weight(1f)
+                        onStateChange = { if (!isReceiverLocked) setButtonPressed(PadBtn.L3, it) },
+                        modifier = Modifier.weight(0.9f)
                     )
                     Surface(
-                        color = SurfaceCharcoal,
-                        shape = RoundedCornerShape(6.dp),
+                        color = palette.surface,
+                        shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
-                            .weight(1.6f)
+                            .weight(1.3f)
                             .fillMaxHeight()
-                            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(6.dp))
+                            .border(1.dp, palette.borderSubtle, RoundedCornerShape(8.dp))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
                                 text = "L(${lx / 10},${ly / 10}) R(${rx / 10},${ry / 10})",
-                                color = TextMuted,
+                                color = palette.textMuted,
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -524,17 +759,91 @@ fun GamepadScreenContent(
                     ShoulderTriggerButton(
                         label = "R3",
                         pressed = (buttonsMask and PadBtn.R3) != 0,
-                        onStateChange = { setButtonPressed(PadBtn.R3, it) },
-                        modifier = Modifier.weight(1f)
+                        onStateChange = { if (!isReceiverLocked) setButtonPressed(PadBtn.R3, it) },
+                        modifier = Modifier.weight(0.9f)
                     )
+                    Spacer(modifier = Modifier.weight(0.3f))
                 }
             }
+        }
+    }
+}
 
-            if (mirrorHands) {
-                leftWingContent()
-            } else {
-                rightWingContent()
-            }
+@Composable
+private fun GamepadEditTogglePill(
+    showLayoutEditor: Boolean,
+    onClick: () -> Unit
+) {
+    val palette = TabRemoteTheme.palette
+    Surface(
+        color = if (showLayoutEditor) palette.primary else palette.controlThumb,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(8.dp))
+            .border(
+                1.dp,
+                if (showLayoutEditor) palette.primary else palette.borderElevated,
+                RoundedCornerShape(8.dp)
+            )
+            .clickable { onClick() }
+            .testTag("gamepad_layout_edit_btn")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (showLayoutEditor) Icons.Default.Check else Icons.Default.Tune,
+                contentDescription = if (showLayoutEditor) "Düzenlemeyi Bitir" else "Yerleşimi Düzenle",
+                tint = if (showLayoutEditor) palette.onAccent else palette.textPrimary,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (showLayoutEditor) "BİTTİ" else "DÜZEN",
+                color = if (showLayoutEditor) palette.onAccent else palette.textPrimary,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                softWrap = false
+            )
+        }
+    }
+}
+
+@Composable
+private fun GamepadResetPill(onClick: () -> Unit) {
+    val palette = TabRemoteTheme.palette
+    Surface(
+        color = palette.surfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, palette.borderSubtle, RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .testTag("gamepad_layout_reset_btn")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.RestartAlt,
+                contentDescription = "Yerleşimi Sıfırla",
+                tint = palette.textPrimary,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+                text = "SIFIRLA",
+                color = palette.textPrimary,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                softWrap = false
+            )
         }
     }
 }
@@ -546,32 +855,33 @@ private fun LayoutSwapChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Surface(
-        color = if (active) RubyPrimary.copy(alpha = 0.22f) else SurfaceContainerCharcoal,
+        color = if (active) palette.controlThumb else palette.surfaceContainer,
         shape = RoundedCornerShape(7.dp),
         modifier = modifier
-            .height(28.dp)
-            .border(1.dp, if (active) RubyPrimary else SurfaceBorderRuby, RoundedCornerShape(7.dp))
+            .height(26.dp)
             .clip(RoundedCornerShape(7.dp))
+            .border(1.dp, if (active) palette.primary else palette.borderSubtle, RoundedCornerShape(7.dp))
             .clickable { onClick() }
     ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             Icon(
                 imageVector = Icons.Default.SwapHoriz,
                 contentDescription = label,
-                tint = if (active) RubyPrimary else TextMuted,
-                modifier = Modifier.size(13.dp)
+                tint = if (active) palette.primary else palette.textSecondary,
+                modifier = Modifier.size(12.dp)
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(3.dp))
             Text(
                 text = label,
-                color = if (active) RubyPrimary else TextSecondary,
+                color = if (active) palette.primary else palette.textPrimary,
                 fontSize = 9.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                fontWeight = FontWeight.Bold,
                 softWrap = false,
                 maxLines = 1
             )
@@ -582,107 +892,65 @@ private fun LayoutSwapChip(
 @Composable
 private fun ConsoleTouchpadSurface(
     title: String,
-    hidProfileMode: HidProfileMode,
-    isWifiMode: Boolean,
-    onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
+    enabled: Boolean = true,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
     onTrackpadTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    val dotColor = palette.trackpadGridDot
+    val primaryColor = palette.primary
+
     var touchPos by remember { mutableStateOf<Offset?>(null) }
-    var panelSize by remember { mutableStateOf(IntSize(400, 220)) }
-    val usePtp = !isWifiMode && hidProfileMode == HidProfileMode.PRECISION_TOUCHPAD
 
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(TrackpadSurface)
-            .border(1.3.dp, SurfaceBorderRuby, RoundedCornerShape(14.dp))
-            .onSizeChanged { panelSize = it }
-            .pointerInput(usePtp) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val downEvent = awaitPointerEvent()
-                        val downPointers = downEvent.changes.filter { it.pressed }
-                        if (downPointers.isEmpty()) continue
+            .background(palette.trackpadSurface)
+            .border(1.2.dp, palette.borderSubtle, RoundedCornerShape(14.dp))
+            .then(
+                if (enabled) {
+                    Modifier.pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val downEvent = awaitPointerEvent()
+                                val downPointers = downEvent.changes.filter { it.pressed }
+                                if (downPointers.isEmpty()) continue
 
-                        val startTime = System.currentTimeMillis()
-                        var totalMove = 0f
-                        var lastPositions = downPointers.associate { it.id to it.position }
-                        val pointerToSlot = mutableMapOf<PointerId, Int>()
-                        val lastCoords = mutableMapOf<Int, Pair<Int, Int>>()
+                                val startTime = System.currentTimeMillis()
+                                var totalMove = 0f
+                                var lastPositions = downPointers.associate { it.id to it.position }
+                                touchPos = downPointers.first().position
 
-                        fun toLogical(p: Offset): Pair<Int, Int> {
-                            val w = panelSize.width.coerceAtLeast(1).toFloat()
-                            val h = panelSize.height.coerceAtLeast(1).toFloat()
-                            val x = ((p.x / w) * HidConstants.TP_LOGICAL_MAX_X).roundToInt()
-                                .coerceIn(0, HidConstants.TP_LOGICAL_MAX_X)
-                            val y = ((p.y / h) * HidConstants.TP_LOGICAL_MAX_Y).roundToInt()
-                                .coerceIn(0, HidConstants.TP_LOGICAL_MAX_Y)
-                            return x to y
-                        }
-
-                        touchPos = downPointers.first().position
-
-                        if (usePtp) {
-                            val initContacts = downPointers.take(2).mapIndexed { idx, ch ->
-                                pointerToSlot[ch.id] = idx
-                                val coords = toLogical(ch.position)
-                                lastCoords[idx] = coords
-                                TouchContact(idx, true, coords.first, coords.second)
-                            }
-                            if (initContacts.isNotEmpty()) {
-                                onTouchpadContacts(initContacts, false)
-                            }
-                        }
-
-                        while (true) {
-                            val ev = awaitPointerEvent()
-                            val pressed = ev.changes.filter { it.pressed }
-                            if (pressed.isEmpty()) {
-                                val elapsed = System.currentTimeMillis() - startTime
-                                if (usePtp) {
-                                    val rel = pointerToSlot.values.map { slot ->
-                                        val c = lastCoords[slot] ?: (1600 to 1000)
-                                        TouchContact(slot, false, c.first, c.second)
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val pressed = ev.changes.filter { it.pressed }
+                                    if (pressed.isEmpty()) {
+                                        val elapsed = System.currentTimeMillis() - startTime
+                                        if (elapsed < 260 && totalMove < 16f) {
+                                            onTrackpadTap()
+                                        }
+                                        touchPos = null
+                                        break
                                     }
-                                    if (rel.isNotEmpty()) onTouchpadContacts(rel, false)
-                                    onTouchpadContacts(emptyList(), false)
-                                } else if (elapsed < 260 && totalMove < 16f) {
-                                    onTrackpadTap()
-                                }
-                                touchPos = null
-                                break
-                            }
 
-                            touchPos = pressed.first().position
-
-                            if (usePtp) {
-                                val contacts = pressed.take(2).mapIndexed { idx, ch ->
+                                    touchPos = pressed.first().position
+                                    val ch = pressed.first()
                                     val prev = lastPositions[ch.id] ?: ch.position
-                                    totalMove += abs(ch.position.x - prev.x) + abs(ch.position.y - prev.y)
+                                    val dx = ch.position.x - prev.x
+                                    val dy = ch.position.y - prev.y
+                                    totalMove += abs(dx) + abs(dy)
                                     ch.consume()
-                                    val slot = pointerToSlot.getOrPut(ch.id) { idx }
-                                    val c = toLogical(ch.position)
-                                    lastCoords[slot] = c
-                                    TouchContact(slot, true, c.first, c.second)
+                                    onTrackpadDrag(dx, dy)
+                                    lastPositions = pressed.associate { it.id to it.position }
                                 }
-                                if (contacts.isNotEmpty()) onTouchpadContacts(contacts, false)
-                            } else {
-                                val ch = pressed.first()
-                                val prev = lastPositions[ch.id] ?: ch.position
-                                val dx = ch.position.x - prev.x
-                                val dy = ch.position.y - prev.y
-                                totalMove += abs(dx) + abs(dy)
-                                ch.consume()
-                                onTrackpadDrag(dx, dy)
                             }
-
-                            lastPositions = pressed.associate { it.id to it.position }
                         }
                     }
+                } else {
+                    Modifier
                 }
-            },
+            ),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -691,27 +959,27 @@ private fun ConsoleTouchpadSurface(
             while (x < size.width) {
                 var y = step
                 while (y < size.height) {
-                    drawCircle(color = TrackpadGridDot, radius = 1.4f, center = Offset(x, y))
+                    drawCircle(color = dotColor, radius = 1.4f, center = Offset(x, y))
                     y += step
                 }
                 x += step
             }
             touchPos?.let { p ->
-                drawCircle(color = RubyPrimary.copy(alpha = 0.28f), radius = 26.dp.toPx(), center = p)
-                drawCircle(color = RubyPrimary, radius = 5.dp.toPx(), center = p)
+                drawCircle(color = primaryColor.copy(alpha = 0.28f), radius = 26.dp.toPx(), center = p)
+                drawCircle(color = primaryColor, radius = 5.dp.toPx(), center = p)
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = title,
-                color = TextMuted.copy(alpha = 0.45f),
+                color = palette.textMuted.copy(alpha = 0.45f),
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.5.sp
             )
             Text(
-                text = "İmleç & Tık",
-                color = TextMuted.copy(alpha = 0.35f),
+                text = "Wi-Fi Gamepad • İmleç & Tık",
+                color = palette.textMuted.copy(alpha = 0.35f),
                 fontSize = 8.sp
             )
         }
@@ -721,76 +989,96 @@ private fun ConsoleTouchpadSurface(
 @Composable
 private fun CrossDPad(
     currentHat: Int,
+    enabled: Boolean = true,
     onHatChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     var boxSize by remember { mutableStateOf(IntSize(100, 100)) }
 
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .background(SurfaceCharcoal.copy(alpha = 0.7f))
-            .border(1.4.dp, SurfaceBorderRuby, CircleShape)
+            .background(palette.surface)
+            .border(1.2.dp, palette.borderSubtle, CircleShape)
             .onSizeChanged { boxSize = it }
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val active = event.changes.firstOrNull { it.pressed }
-                        if (active == null) {
-                            onHatChange(8)
-                            continue
-                        }
-                        active.consume()
-                        val cx = boxSize.width / 2f
-                        val cy = boxSize.height / 2f
-                        val dx = active.position.x - cx
-                        val dy = active.position.y - cy
-                        val dist = hypot(dx.toDouble(), dy.toDouble())
-                        if (dist < boxSize.width * 0.14f) {
-                            onHatChange(8)
-                        } else {
-                            val deg = ((Math.toDegrees(atan2(dx.toDouble(), -dy.toDouble())) + 360.0) % 360.0)
-                            val sector = (((deg + 22.5) / 45.0).toInt()) % 8
-                            onHatChange(sector)
+            .then(
+                if (enabled) {
+                    Modifier.pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val active = event.changes.firstOrNull { it.pressed }
+                                if (active == null) {
+                                    onHatChange(8)
+                                    continue
+                                }
+                                active.consume()
+                                val cx = boxSize.width / 2f
+                                val cy = boxSize.height / 2f
+                                val dx = active.position.x - cx
+                                val dy = active.position.y - cy
+                                val dist = hypot(dx.toDouble(), dy.toDouble())
+                                if (dist < boxSize.width * 0.14f) {
+                                    onHatChange(8)
+                                } else {
+                                    val deg = ((Math.toDegrees(atan2(dx.toDouble(), -dy.toDouble())) + 360.0) % 360.0)
+                                    val sector = (((deg + 22.5) / 45.0).toInt()) % 8
+                                    onHatChange(sector)
+                                }
+                            }
                         }
                     }
+                } else {
+                    Modifier
                 }
-            }
+            )
             .testTag("gamepad_dpad"),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = Icons.Default.KeyboardArrowUp,
             contentDescription = "Up",
-            tint = if (currentHat in listOf(7, 0, 1)) RubyPrimary else TextSecondary,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).size(26.dp)
+            tint = if (currentHat in listOf(7, 0, 1)) palette.primary else palette.textSecondary,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp)
+                .size(26.dp)
         )
         Icon(
             imageVector = Icons.Default.KeyboardArrowDown,
             contentDescription = "Down",
-            tint = if (currentHat in listOf(3, 4, 5)) RubyPrimary else TextSecondary,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp).size(26.dp)
+            tint = if (currentHat in listOf(3, 4, 5)) palette.primary else palette.textSecondary,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 8.dp)
+                .size(26.dp)
         )
         Icon(
             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
             contentDescription = "Left",
-            tint = if (currentHat in listOf(5, 6, 7)) RubyPrimary else TextSecondary,
-            modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(24.dp)
+            tint = if (currentHat in listOf(5, 6, 7)) palette.primary else palette.textSecondary,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 8.dp)
+                .size(24.dp)
         )
         Icon(
             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
             contentDescription = "Right",
-            tint = if (currentHat in listOf(1, 2, 3)) RubyPrimary else TextSecondary,
-            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp).size(24.dp)
+            tint = if (currentHat in listOf(1, 2, 3)) palette.primary else palette.textSecondary,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 8.dp)
+                .size(24.dp)
         )
 
         Box(
             modifier = Modifier
                 .size(22.dp)
                 .clip(CircleShape)
-                .background(if (currentHat != 8) RubyPrimary.copy(alpha = 0.35f) else SurfaceContainerCharcoal)
-                .border(1.dp, SurfaceBorderRuby, CircleShape)
+                .background(if (currentHat != 8) palette.primary else palette.surfaceContainer)
+                .border(1.dp, palette.borderElevated, CircleShape)
         )
     }
 }
@@ -798,84 +1086,96 @@ private fun CrossDPad(
 @Composable
 private fun VirtualAnalogStick(
     label: String,
+    enabled: Boolean = true,
     onStickMove: (Int, Int) -> Unit,
     onStickRelease: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    val ringColor = palette.borderElevated
+    val primaryColor = palette.primary
     var knobOffset by remember { mutableStateOf(Offset.Zero) }
     var boxSize by remember { mutableStateOf(IntSize(100, 100)) }
 
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .background(SurfaceCharcoal)
-            .border(1.4.dp, SurfaceBorderRuby, CircleShape)
+            .background(palette.surface)
+            .border(1.2.dp, palette.borderSubtle, CircleShape)
             .onSizeChanged { boxSize = it }
-            .pointerInput(label) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val downEvent = awaitPointerEvent()
-                        val firstDown = downEvent.changes.firstOrNull { it.pressed } ?: continue
-                        val pointerId = firstDown.id
-                        firstDown.consume()
+            .then(
+                if (enabled) {
+                    Modifier.pointerInput(label) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val downEvent = awaitPointerEvent()
+                                val firstDown = downEvent.changes.firstOrNull { it.pressed } ?: continue
+                                val pointerId = firstDown.id
+                                firstDown.consume()
 
-                        fun updateFromPos(pos: Offset) {
-                            val center = Offset(boxSize.width / 2f, boxSize.height / 2f)
-                            val maxRadius = (minOf(boxSize.width, boxSize.height) / 2f) * 0.64f
-                            val delta = pos - center
-                            val dist = hypot(delta.x.toDouble(), delta.y.toDouble()).toFloat()
-                            val clamped = if (dist > maxRadius && maxRadius > 0f) {
-                                val angle = atan2(delta.y.toDouble(), delta.x.toDouble())
-                                Offset((cos(angle) * maxRadius).toFloat(), (sin(angle) * maxRadius).toFloat())
-                            } else delta
-                            knobOffset = clamped
-                            val normX = ((clamped.x / maxRadius.coerceAtLeast(1f)) * 127f).roundToInt().coerceIn(-127, 127)
-                            val normY = ((clamped.y / maxRadius.coerceAtLeast(1f)) * 127f).roundToInt().coerceIn(-127, 127)
-                            onStickMove(normX, normY)
-                        }
+                                fun updateFromPos(pos: Offset) {
+                                    val center = Offset(boxSize.width / 2f, boxSize.height / 2f)
+                                    val maxRadius = (minOf(boxSize.width, boxSize.height) / 2f) * 0.64f
+                                    val delta = pos - center
+                                    val dist = hypot(delta.x.toDouble(), delta.y.toDouble()).toFloat()
+                                    val clamped = if (dist > maxRadius && maxRadius > 0f) {
+                                        val angle = atan2(delta.y.toDouble(), delta.x.toDouble())
+                                        Offset((cos(angle) * maxRadius).toFloat(), (sin(angle) * maxRadius).toFloat())
+                                    } else {
+                                        delta
+                                    }
+                                    knobOffset = clamped
+                                    val normX = ((clamped.x / maxRadius.coerceAtLeast(1f)) * 127f).roundToInt().coerceIn(-127, 127)
+                                    val normY = ((clamped.y / maxRadius.coerceAtLeast(1f)) * 127f).roundToInt().coerceIn(-127, 127)
+                                    onStickMove(normX, normY)
+                                }
 
-                        updateFromPos(firstDown.position)
+                                updateFromPos(firstDown.position)
 
-                        while (true) {
-                            val ev = awaitPointerEvent()
-                            val tracked = ev.changes.firstOrNull { it.id == pointerId }
-                            if (tracked == null || !tracked.pressed) {
-                                knobOffset = Offset.Zero
-                                onStickRelease()
-                                break
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val tracked = ev.changes.firstOrNull { it.id == pointerId }
+                                    if (tracked == null || !tracked.pressed) {
+                                        knobOffset = Offset.Zero
+                                        onStickRelease()
+                                        break
+                                    }
+                                    tracked.consume()
+                                    updateFromPos(tracked.position)
+                                }
                             }
-                            tracked.consume()
-                            updateFromPos(tracked.position)
                         }
                     }
+                } else {
+                    Modifier
                 }
-            },
+            ),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val center = Offset(size.width / 2f, size.height / 2f)
             drawCircle(
-                color = SurfaceBorderRuby,
+                color = ringColor,
                 radius = size.minDimension * 0.34f,
                 center = center,
-                style = Stroke(width = 1.8.dp.toPx())
+                style = Stroke(width = 1.6.dp.toPx())
             )
             val thumbCenter = center + knobOffset
             drawCircle(
-                color = RubyPrimary.copy(alpha = 0.32f),
-                radius = 24.dp.toPx(),
+                color = primaryColor.copy(alpha = 0.25f),
+                radius = 23.dp.toPx(),
                 center = thumbCenter
             )
             drawCircle(
-                color = RubyPrimary,
-                radius = 18.dp.toPx(),
+                color = primaryColor,
+                radius = 17.dp.toPx(),
                 center = thumbCenter
             )
         }
         if (knobOffset == Offset.Zero) {
             Text(
                 text = label,
-                color = Color.White.copy(alpha = 0.85f),
+                color = palette.onAccent,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.ExtraBold
             )
@@ -886,37 +1186,51 @@ private fun VirtualAnalogStick(
 @Composable
 private fun PlayStationSymbolDiamond(
     buttonsMask: Int,
+    enabled: Boolean = true,
     onButtonState: (bit: Int, down: Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Box(modifier = modifier) {
         PsSymbolButton(
             symbol = PsSymbol.TRIANGLE,
             accent = GreenSuccess,
             pressed = (buttonsMask and PadBtn.Y_TRIANGLE) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.Y_TRIANGLE, it) },
-            modifier = Modifier.align(Alignment.TopCenter).testTag("gamepad_btn_triangle")
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .testTag("gamepad_btn_triangle")
         )
         PsSymbolButton(
             symbol = PsSymbol.SQUARE,
             accent = Color(0xFFF48FB1),
             pressed = (buttonsMask and PadBtn.X_SQUARE) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.X_SQUARE, it) },
-            modifier = Modifier.align(Alignment.CenterStart).testTag("gamepad_btn_square")
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .testTag("gamepad_btn_square")
         )
         PsSymbolButton(
             symbol = PsSymbol.CIRCLE,
-            accent = RubyPrimary,
+            accent = palette.primary,
             pressed = (buttonsMask and PadBtn.B_CIRCLE) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.B_CIRCLE, it) },
-            modifier = Modifier.align(Alignment.CenterEnd).testTag("gamepad_btn_circle")
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .testTag("gamepad_btn_circle")
         )
         PsSymbolButton(
             symbol = PsSymbol.CROSS,
             accent = Color(0xFF4FC3F7),
             pressed = (buttonsMask and PadBtn.A_CROSS) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.A_CROSS, it) },
-            modifier = Modifier.align(Alignment.BottomCenter).testTag("gamepad_btn_cross")
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .testTag("gamepad_btn_cross")
         )
     }
 }
@@ -926,30 +1240,42 @@ private fun PsSymbolButton(
     symbol: PsSymbol,
     accent: Color,
     pressed: Boolean,
+    enabled: Boolean = true,
     onStateChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Surface(
-        color = if (pressed) accent.copy(alpha = 0.35f) else SurfaceCharcoal,
+        color = if (pressed) accent.copy(alpha = 0.35f) else palette.surface,
         shape = CircleShape,
         modifier = modifier
-            .size(46.dp)
-            .border(1.4.dp, if (pressed) accent else SurfaceBorderRuby, CircleShape)
-            .pointerInput(symbol) {
-                detectTapGestures(
-                    onPress = {
-                        onStateChange(true)
-                        tryAwaitRelease()
-                        onStateChange(false)
+            .size(44.dp)
+            .border(1.2.dp, if (pressed) accent else palette.borderSubtle, CircleShape)
+            .then(
+                if (enabled) {
+                    Modifier.pointerInput(symbol) {
+                        detectTapGestures(
+                            onPress = {
+                                onStateChange(true)
+                                tryAwaitRelease()
+                                onStateChange(false)
+                            }
+                        )
                     }
-                )
-            }
+                } else {
+                    Modifier
+                }
+            )
     ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(11.dp)
+        ) {
             val w = size.width
             val h = size.height
             val strokeColor = if (pressed) Color.White else accent
-            val stroke = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            val stroke = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
             when (symbol) {
                 PsSymbol.TRIANGLE -> {
                     val path = Path().apply {
@@ -968,7 +1294,12 @@ private fun PsSymbolButton(
                     drawLine(strokeColor, Offset(w - 1f, 1f), Offset(1f, h - 1f), strokeWidth = stroke.width, cap = StrokeCap.Round)
                 }
                 PsSymbol.SQUARE -> {
-                    drawRect(color = strokeColor, topLeft = Offset(1f, 1f), size = androidx.compose.ui.geometry.Size(w - 2f, h - 2f), style = stroke)
+                    drawRect(
+                        color = strokeColor,
+                        topLeft = Offset(1f, 1f),
+                        size = androidx.compose.ui.geometry.Size(w - 2f, h - 2f),
+                        style = stroke
+                    )
                 }
             }
         }
@@ -978,37 +1309,51 @@ private fun PsSymbolButton(
 @Composable
 private fun XboxAbxyDiamond(
     buttonsMask: Int,
+    enabled: Boolean = true,
     onButtonState: (bit: Int, down: Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Box(modifier = modifier) {
         XboxFaceButton(
             label = "Y",
             accent = Color(0xFFFFD54F),
             pressed = (buttonsMask and PadBtn.Y_TRIANGLE) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.Y_TRIANGLE, it) },
-            modifier = Modifier.align(Alignment.TopCenter).testTag("gamepad_btn_y")
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .testTag("gamepad_btn_y")
         )
         XboxFaceButton(
             label = "X",
             accent = Color(0xFF4FC3F7),
             pressed = (buttonsMask and PadBtn.X_SQUARE) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.X_SQUARE, it) },
-            modifier = Modifier.align(Alignment.CenterStart).testTag("gamepad_btn_x")
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .testTag("gamepad_btn_x")
         )
         XboxFaceButton(
             label = "B",
-            accent = RubyPrimary,
+            accent = palette.primary,
             pressed = (buttonsMask and PadBtn.B_CIRCLE) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.B_CIRCLE, it) },
-            modifier = Modifier.align(Alignment.CenterEnd).testTag("gamepad_btn_b")
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .testTag("gamepad_btn_b")
         )
         XboxFaceButton(
             label = "A",
             accent = GreenSuccess,
             pressed = (buttonsMask and PadBtn.A_CROSS) != 0,
+            enabled = enabled,
             onStateChange = { onButtonState(PadBtn.A_CROSS, it) },
-            modifier = Modifier.align(Alignment.BottomCenter).testTag("gamepad_btn_a")
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .testTag("gamepad_btn_a")
         )
     }
 }
@@ -1018,30 +1363,38 @@ private fun XboxFaceButton(
     label: String,
     accent: Color,
     pressed: Boolean,
+    enabled: Boolean = true,
     onStateChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Surface(
-        color = if (pressed) accent.copy(alpha = 0.35f) else SurfaceCharcoal,
+        color = if (pressed) accent.copy(alpha = 0.35f) else palette.surface,
         shape = CircleShape,
         modifier = modifier
-            .size(46.dp)
-            .border(1.4.dp, if (pressed) accent else SurfaceBorderRuby, CircleShape)
-            .pointerInput(label) {
-                detectTapGestures(
-                    onPress = {
-                        onStateChange(true)
-                        tryAwaitRelease()
-                        onStateChange(false)
+            .size(44.dp)
+            .border(1.2.dp, if (pressed) accent else palette.borderSubtle, CircleShape)
+            .then(
+                if (enabled) {
+                    Modifier.pointerInput(label) {
+                        detectTapGestures(
+                            onPress = {
+                                onStateChange(true)
+                                tryAwaitRelease()
+                                onStateChange(false)
+                            }
+                        )
                     }
-                )
-            }
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 color = if (pressed) Color.White else accent,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.ExtraBold
             )
         }
@@ -1055,14 +1408,15 @@ private fun ShoulderTriggerButton(
     onStateChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Surface(
-        color = if (pressed) RubyPrimary.copy(alpha = 0.35f) else SurfaceCharcoal,
+        color = if (pressed) palette.primary else palette.surface,
         shape = RoundedCornerShape(8.dp),
         modifier = modifier
             .fillMaxHeight()
             .border(
-                1.2.dp,
-                if (pressed) RubyPrimary else SurfaceBorderRuby,
+                1.dp,
+                if (pressed) palette.primary else palette.borderSubtle,
                 RoundedCornerShape(8.dp)
             )
             .pointerInput(label) {
@@ -1078,7 +1432,7 @@ private fun ShoulderTriggerButton(
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
-                color = if (pressed) Color.White else TextPrimary,
+                color = if (pressed) palette.onAccent else palette.textPrimary,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 softWrap = false,

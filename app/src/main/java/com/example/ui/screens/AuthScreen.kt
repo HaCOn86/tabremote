@@ -29,7 +29,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.DevicesOther
-import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
@@ -50,7 +49,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -65,16 +63,8 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
-import com.example.ui.theme.BackgroundPitch
 import com.example.ui.theme.RedDanger
-import com.example.ui.theme.RubyAccent
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.SurfaceContainerCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.TabRemoteTheme
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -92,9 +82,9 @@ import kotlinx.coroutines.withContext
 fun AuthScreen(
     onAuthSuccess: () -> Unit,
     onContinueBluetoothOnly: () -> Unit = {},
-    onContinueGuest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
@@ -130,9 +120,9 @@ fun AuthScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF1A0308),
-                        BackgroundPitch,
-                        BackgroundPitch
+                        palette.heroGlowTop,
+                        palette.background,
+                        palette.background
                     )
                 )
             )
@@ -152,14 +142,14 @@ fun AuthScreen(
                 modifier = Modifier
                     .scale(logoScale)
                     .size(76.dp)
-                    .background(RubyPrimary.copy(alpha = 0.16f), CircleShape)
-                    .border(1.5.dp, RubyPrimary.copy(alpha = 0.65f), CircleShape),
+                    .background(palette.primary.copy(alpha = 0.16f), CircleShape)
+                    .border(1.5.dp, palette.primary.copy(alpha = 0.65f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.TouchApp,
                     contentDescription = "TabRemote",
-                    tint = RubyPrimary,
+                    tint = palette.primary,
                     modifier = Modifier.size(36.dp)
                 )
             }
@@ -167,7 +157,7 @@ fun AuthScreen(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = "TabRemote",
-                    color = TextPrimary,
+                    color = palette.textPrimary,
                     fontSize = 27.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 0.8.sp
@@ -175,7 +165,7 @@ fun AuthScreen(
                 Spacer(modifier = Modifier.height(5.dp))
                 Text(
                     text = "Bluetooth Touchpad HID veya Google hesabıyla Wi-Fi Alıcı tablet kontrolü. Kullanım şeklinizi seçin:",
-                    color = TextSecondary,
+                    color = palette.textSecondary,
                     fontSize = 12.5.sp,
                     textAlign = TextAlign.Center,
                     lineHeight = 17.sp
@@ -183,11 +173,11 @@ fun AuthScreen(
             }
 
             Surface(
-                color = SurfaceCharcoal,
+                color = palette.surface,
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(16.dp))
+                    .border(1.dp, palette.borderAccent, RoundedCornerShape(16.dp))
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -206,7 +196,7 @@ fun AuthScreen(
                     FeatureRow(
                         icon = Icons.Default.Wifi,
                         title = "İstediğiniz Zaman Hesap Bağlayın",
-                        subtitle = "Hesapsız veya Bluetooth modunda başlasanız bile Ayarlar'dan Google hesabınızı bağlayabilirsiniz."
+                        subtitle = "Bluetooth modunda başlasanız bile Ayarlar'dan Google hesabınızı bağlayabilirsiniz."
                     )
                 }
             }
@@ -228,6 +218,8 @@ fun AuthScreen(
                 }
             }
 
+            val signInBtnEnabled = !isLoading && !isAutoChecking
+            val signInFg = if (signInBtnEnabled) palette.onAccent else palette.textPrimary
             Button(
                 onClick = {
                     errorMessage = null
@@ -249,10 +241,12 @@ fun AuthScreen(
                         }
                     )
                 },
-                enabled = !isLoading && !isAutoChecking,
+                enabled = signInBtnEnabled,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = RubyPrimary,
-                    disabledContainerColor = SurfaceContainerCharcoal
+                    containerColor = palette.primary,
+                    contentColor = palette.onAccent,
+                    disabledContainerColor = palette.surfaceContainer,
+                    disabledContentColor = palette.textPrimary
                 ),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
@@ -262,34 +256,34 @@ fun AuthScreen(
             ) {
                 if (isLoading || isAutoChecking) {
                     CircularProgressIndicator(
-                        color = Color.White,
+                        color = signInFg,
                         strokeWidth = 2.4.dp,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = if (isAutoChecking) "Oturum Kontrol Ediliyor..." else "Google ile Bağlanılıyor...",
-                        color = Color.White,
+                        color = signInFg,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                 } else {
                     Text(
                         text = "Google ile Giriş Yap",
-                        color = Color.White,
+                        color = palette.onAccent,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            // Secondary Entry Options: Bluetooth-Only & Guest Mode
+            // Secondary Entry Option: Bluetooth-Only Mode (no Google / no Wi-Fi)
             Surface(
-                color = SurfaceCharcoal,
+                color = palette.surface,
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(14.dp))
+                    .border(1.dp, palette.borderAccent, RoundedCornerShape(14.dp))
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -297,14 +291,14 @@ fun AuthScreen(
                 ) {
                     Text(
                         text = "HESAP VEYA WI-FI KULLANMAK İSTEMİYORSANIZ",
-                        color = RubyPrimary,
+                        color = palette.primary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.6.sp
                     )
                     Text(
-                        text = "Google oturumu açmadan doğrudan Bluetooth HID kumanda olarak kullanabilir veya çevrimdışı devam edebilirsiniz.",
-                        color = TextSecondary,
+                        text = "Google oturumu ve erişilebilirlik izni gerekmeden doğrudan Bluetooth HID kumanda olarak bağlanabilirsiniz.",
+                        color = palette.textSecondary,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
                     )
@@ -313,7 +307,7 @@ fun AuthScreen(
                         onClick = onContinueBluetoothOnly,
                         enabled = !isLoading,
                         shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.2.dp, RubyPrimary.copy(alpha = 0.7f)),
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, palette.primary.copy(alpha = 0.75f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -322,40 +316,15 @@ fun AuthScreen(
                         Icon(
                             imageVector = Icons.Default.Bluetooth,
                             contentDescription = "Sadece Bluetooth Kullan",
-                            tint = RubyPrimary,
+                            tint = palette.primary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Sadece Bluetooth Kullan",
-                            color = RubyPrimary,
-                            fontSize = 13.sp,
+                            color = palette.primary,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = onContinueGuest,
-                        enabled = !isLoading,
-                        shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorderRuby),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("guest_continue_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PersonOff,
-                            contentDescription = "Giriş Yapmadan Devam Et",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Giriş Yapmadan Devam Et",
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -363,7 +332,7 @@ fun AuthScreen(
 
             Text(
                 text = "Bulut eşlemesi için yalnızca aynı Google hesabındaki cihazlarınız listelenir.",
-                color = TextMuted,
+                color = palette.textMuted,
                 fontSize = 10.5.sp,
                 textAlign = TextAlign.Center
             )
@@ -377,6 +346,7 @@ private fun FeatureRow(
     title: String,
     subtitle: String
 ) {
+    val palette = TabRemoteTheme.palette
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -384,20 +354,20 @@ private fun FeatureRow(
         Box(
             modifier = Modifier
                 .size(34.dp)
-                .background(RubyAccent.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
-                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp)),
+                .background(palette.accent.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                .border(1.dp, palette.borderAccent, RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = title,
-                tint = RubyPrimary,
+                tint = palette.primary,
                 modifier = Modifier.size(18.dp)
             )
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-            Text(text = subtitle, color = TextSecondary, fontSize = 10.5.sp, lineHeight = 14.sp)
+            Text(text = title, color = palette.textPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+            Text(text = subtitle, color = palette.textSecondary, fontSize = 10.5.sp, lineHeight = 14.sp)
         }
     }
 }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,6 +40,11 @@ import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,15 +67,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bluetooth.HidConstants
-import com.example.ui.theme.BackgroundPitch
-import com.example.ui.theme.RubyAccent
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.SurfaceContainerCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.model.MouseButton
+import com.example.model.ReceiverTelemetry
+import com.example.model.RemoteSettings
+import com.example.ui.components.ReceiverLockedControlContainer
+import com.example.ui.theme.TabRemoteTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -88,6 +91,10 @@ fun LandscapePcKeyboardContent(
     showNumpad: Boolean,
     splitKeyboard: Boolean,
     splitGapWeight: Float = 1.6f,
+    isReceiverLocked: Boolean = false,
+    isWifiConnected: Boolean = false,
+    telemetry: ReceiverTelemetry = ReceiverTelemetry(),
+    settings: RemoteSettings = RemoteSettings(),
     onToggleLayout: () -> Unit,
     onToggleNumberRow: () -> Unit,
     onToggleNumpad: () -> Unit,
@@ -95,10 +102,27 @@ fun LandscapePcKeyboardContent(
     onUpdateSplitGapWeight: (Float) -> Unit = {},
     onExitFullscreen: () -> Unit,
     onSendKey: (hidKeyCode: Int, modifier: Int) -> Unit,
+    onMediaAction: (String) -> Unit = {},
+    onTrackpadDrag: (Float, Float) -> Unit = { _, _ -> },
+    onTwoFingerVerticalScroll: (Float) -> Unit = {},
+    onTwoFingerGestureEnd: () -> Unit = {},
+    onClassicPinchZoomStep: (Float) -> Unit = {},
+    onClassicPinchZoomEnd: () -> Unit = {},
+    onTwoFingerHorizontalSwipe: (Float) -> Unit = {},
+    onTrackpadTap: () -> Unit = {},
+    onTouchpadHoldStart: () -> Unit = {},
+    onTouchpadHoldEnd: () -> Unit = {},
+    onMouseButtonClick: (MouseButton) -> Unit = {},
+    onMouseButtonDown: (MouseButton) -> Unit = {},
+    onMouseButtonUp: (MouseButton) -> Unit = {},
+    onHomeClick: () -> Unit = {},
+    onRecentAppsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     var stickyModifiers by remember { mutableIntStateOf(0) }
     var capsLockActive by remember { mutableStateOf(false) }
+    var showTouchpadPanel by remember { mutableStateOf(false) }
 
     val effectiveSplit = splitKeyboard && !showNumpad
     val animatedGapWeight by animateFloatAsState(
@@ -121,7 +145,7 @@ fun LandscapePcKeyboardContent(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(BackgroundPitch)
+            .background(palette.background)
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -130,7 +154,7 @@ fun LandscapePcKeyboardContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(32.dp),
+                .height(34.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -161,14 +185,21 @@ fun LandscapePcKeyboardContent(
                 )
             }
 
+            ToolbarChip(
+                label = if (showTouchpadPanel) "TOUCHPAD AÇIK" else "TOUCHPAD",
+                selected = showTouchpadPanel,
+                onClick = { showTouchpadPanel = !showTouchpadPanel },
+                modifier = Modifier.testTag("pc_kb_touchpad_toggle")
+            )
+
             // Draggable & Quick-Step Split Gap Controller when split keyboard is enabled
             AnimatedVisibility(visible = effectiveSplit) {
                 Surface(
-                    color = SurfaceCharcoal,
+                    color = palette.surface,
                     shape = RoundedCornerShape(7.dp),
                     modifier = Modifier
                         .fillMaxHeight()
-                        .border(1.dp, RubyPrimary.copy(alpha = 0.55f), RoundedCornerShape(7.dp))
+                        .border(1.dp, palette.primary.copy(alpha = 0.55f), RoundedCornerShape(7.dp))
                         .testTag("pc_kb_split_handle")
                 ) {
                     Row(
@@ -185,7 +216,7 @@ fun LandscapePcKeyboardContent(
                     ) {
                         Text(
                             text = "−",
-                            color = RubyPrimary,
+                            color = palette.primary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
                             modifier = Modifier
@@ -196,18 +227,18 @@ fun LandscapePcKeyboardContent(
                         Icon(
                             imageVector = Icons.Default.DragIndicator,
                             contentDescription = "Boşluğu Sürükle",
-                            tint = RubyPrimary,
+                            tint = palette.primary,
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
                             text = "BOŞLUK",
-                            color = TextSecondary,
+                            color = palette.textSecondary,
                             fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = "+",
-                            color = RubyPrimary,
+                            color = palette.primary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
                             modifier = Modifier
@@ -222,12 +253,12 @@ fun LandscapePcKeyboardContent(
             Spacer(modifier = Modifier.weight(1f))
 
             Surface(
-                color = RubyPrimary.copy(alpha = 0.22f),
+                color = palette.primary.copy(alpha = 0.22f),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
                     .fillMaxHeight()
-                    .border(1.dp, RubyPrimary, RoundedCornerShape(8.dp))
                     .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, palette.primary, RoundedCornerShape(8.dp))
                     .clickable { onExitFullscreen() }
                     .testTag("pc_kb_exit_btn")
             ) {
@@ -238,13 +269,13 @@ fun LandscapePcKeyboardContent(
                     Icon(
                         imageVector = Icons.Default.FullscreenExit,
                         contentDescription = "Tam Ekrandan Çık",
-                        tint = RubyPrimary,
+                        tint = palette.primary,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "ÇIKIŞ",
-                        color = RubyPrimary,
+                        color = palette.primary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -252,13 +283,41 @@ fun LandscapePcKeyboardContent(
             }
         }
 
-        // Main Keyboard + Optional Numpad Container
-        Row(
+        // Main Adaptive Keyboard + Companion Deck + Slide-Up Touchpad Container
+        ReceiverLockedControlContainer(
+            isLockedForReceiver = isReceiverLocked,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .fillMaxWidth()
         ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val isTallTablet = maxHeight >= 520.dp
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (isTallTablet) {
+                        TabletKeyboardCompanionDeck(
+                            isWifiConnected = isWifiConnected,
+                            telemetry = telemetry,
+                            onMediaAction = onMediaAction,
+                            onSendKey = onSendKey
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (isTallTablet) {
+                                    Modifier.heightIn(min = 240.dp, max = if (showTouchpadPanel) 310.dp else 380.dp)
+                                } else {
+                                    Modifier.weight(1f)
+                                }
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
             Box(
                 modifier = Modifier
                     .weight(if (showNumpad) 3.4f else 1f)
@@ -671,8 +730,8 @@ fun LandscapePcKeyboardContent(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(SurfaceCharcoal.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                        .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(8.dp))
+                        .background(palette.surface.copy(alpha = 0.65f), RoundedCornerShape(8.dp))
+                        .border(1.dp, palette.borderAccent, RoundedCornerShape(8.dp))
                         .padding(3.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
@@ -708,6 +767,198 @@ fun LandscapePcKeyboardContent(
                 }
             }
         }
+
+                    // Slide-Up Embedded Touchpad Drawer (slides keyboard up cleanly on toggle)
+                    AnimatedVisibility(
+                        visible = showTouchpadPanel,
+                        enter = expandVertically(tween(220)) + fadeIn(tween(150)),
+                        exit = shrinkVertically(tween(200)) + fadeOut(tween(120))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(if (isTallTablet) 160.dp else 132.dp)
+                                .testTag("pc_kb_embedded_touchpad"),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TrackpadSurfacePanel(
+                                settings = settings,
+                                isWifiMode = isWifiConnected,
+                                onTrackpadDrag = onTrackpadDrag,
+                                onTwoFingerVerticalScroll = onTwoFingerVerticalScroll,
+                                onTwoFingerGestureEnd = onTwoFingerGestureEnd,
+                                onClassicPinchZoomStep = onClassicPinchZoomStep,
+                                onClassicPinchZoomEnd = onClassicPinchZoomEnd,
+                                onTwoFingerHorizontalSwipe = onTwoFingerHorizontalSwipe,
+                                onTrackpadTap = onTrackpadTap,
+                                onTouchpadHoldStart = onTouchpadHoldStart,
+                                onTouchpadHoldEnd = onTouchpadHoldEnd,
+                                onMouseButtonClick = onMouseButtonClick,
+                                onHomeClick = onHomeClick,
+                                onRecentAppsClick = onRecentAppsClick,
+                                modifier = Modifier
+                                    .weight(1.35f)
+                                    .fillMaxHeight()
+                            )
+
+                            Column(
+                                modifier = Modifier
+                                    .weight(0.45f)
+                                    .fillMaxHeight(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                MorphableMouseButtonTile(
+                                    title = "SOL TIK",
+                                    compactSubtitle = "Seç",
+                                    expandedSubtitle = "SOL TIK",
+                                    morphFraction = 0.25f,
+                                    accentColor = palette.primary,
+                                    onClick = { onMouseButtonClick(MouseButton.LEFT) },
+                                    onDown = { onMouseButtonDown(MouseButton.LEFT) },
+                                    onUp = { onMouseButtonUp(MouseButton.LEFT) },
+                                    modifier = Modifier
+                                        .weight(1.2f)
+                                        .fillMaxWidth()
+                                )
+                                MorphableMouseButtonTile(
+                                    title = "SAĞ TIK",
+                                    compactSubtitle = "Menü",
+                                    expandedSubtitle = "SAĞ TIK",
+                                    morphFraction = 0.25f,
+                                    accentColor = palette.primary,
+                                    onClick = { onMouseButtonClick(MouseButton.RIGHT) },
+                                    onDown = { onMouseButtonDown(MouseButton.RIGHT) },
+                                    onUp = { onMouseButtonUp(MouseButton.RIGHT) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletKeyboardCompanionDeck(
+    isWifiConnected: Boolean,
+    telemetry: ReceiverTelemetry,
+    onMediaAction: (String) -> Unit,
+    onSendKey: (Int, Int) -> Unit
+) {
+    val palette = TabRemoteTheme.palette
+    Surface(
+        color = palette.shadedPanel,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, palette.borderSubtle, RoundedCornerShape(14.dp))
+            .testTag("tablet_keyboard_companion_deck")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isWifiConnected) {
+                        telemetry.activeAppName.ifBlank { "Bağlı Alıcı Tablet" }
+                    } else {
+                        "Tablet Ergonomik Klavye Üst Paneli"
+                    },
+                    color = palette.textPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = if (isWifiConnected && telemetry.mediaTitle.isNotBlank()) {
+                        "♪ ${telemetry.mediaTitle}"
+                    } else {
+                        "Hızlı kısayollar ve medya denetimi parmak ucunuzda"
+                    },
+                    color = palette.textSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                listOf(
+                    Triple("Kopyala", HidConstants.KEY_C, HidConstants.MOD_LCTRL),
+                    Triple("Yapıştır", HidConstants.KEY_V, HidConstants.MOD_LCTRL),
+                    Triple("Geri Al", HidConstants.KEY_Z, HidConstants.MOD_LCTRL),
+                    Triple("Tümünü Seç", HidConstants.KEY_A, HidConstants.MOD_LCTRL)
+                ).forEach { (lbl, code, mod) ->
+                    Surface(
+                        color = palette.surfaceContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, palette.borderSubtle, RoundedCornerShape(8.dp))
+                            .clickable { onSendKey(code, mod) }
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+                            Text(lbl, color = palette.textPrimary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                Surface(
+                    color = palette.surfaceContainer,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .height(34.dp)
+                        .border(1.dp, palette.borderSubtle, RoundedCornerShape(10.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipPrevious,
+                            contentDescription = "Önceki",
+                            tint = palette.textPrimary,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onMediaAction("PREV") }
+                                .padding(5.dp)
+                        )
+                        Icon(
+                            imageVector = if (telemetry.isMediaPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Oynat/Duraklat",
+                            tint = palette.primary,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onMediaAction("PLAY_PAUSE") }
+                                .padding(4.dp)
+                        )
+                        Icon(
+                            imageVector = Icons.Default.SkipNext,
+                            contentDescription = "Sonraki",
+                            tint = palette.textPrimary,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onMediaAction("NEXT") }
+                                .padding(5.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -735,11 +986,12 @@ private fun RowScope.PcSplitGapSpacer(
         contentAlignment = Alignment.Center
     ) {
         if (showHandle) {
+            val palette = TabRemoteTheme.palette
             Box(
                 modifier = Modifier
                     .width(4.dp)
                     .height(22.dp)
-                    .background(RubyPrimary.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                    .background(palette.primary.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
             )
         }
     }
@@ -752,13 +1004,14 @@ private fun ToolbarChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Surface(
-        color = if (selected) RubyPrimary.copy(alpha = 0.16f) else SurfaceCharcoal,
+        color = if (selected) palette.primary.copy(alpha = 0.16f) else palette.surface,
         shape = RoundedCornerShape(7.dp),
         modifier = modifier
             .fillMaxHeight()
-            .border(1.dp, if (selected) RubyPrimary.copy(alpha = 0.6f) else SurfaceBorderRuby, RoundedCornerShape(7.dp))
             .clip(RoundedCornerShape(7.dp))
+            .border(1.dp, if (selected) palette.primary.copy(alpha = 0.6f) else palette.borderAccent, RoundedCornerShape(7.dp))
             .clickable { onClick() }
     ) {
         Box(
@@ -767,7 +1020,7 @@ private fun ToolbarChip(
         ) {
             Text(
                 text = label,
-                color = if (selected) RubyPrimary else TextSecondary,
+                color = if (selected) palette.primary else palette.textSecondary,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -787,22 +1040,24 @@ private fun RowScope.PcKeyTile(
     repeatable: Boolean = false,
     onTap: () -> Unit
 ) {
+    val palette = TabRemoteTheme.palette
     var pressed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Surface(
         color = when {
-            pressed -> RubyPrimary.copy(alpha = 0.38f)
-            accent -> RubyPrimary.copy(alpha = 0.14f)
-            else -> SurfaceCharcoal
+            pressed -> palette.primary.copy(alpha = 0.36f)
+            accent -> palette.pcKeyAccentSurface
+            else -> palette.pcKeySurface
         },
         shape = RoundedCornerShape(6.dp),
         modifier = Modifier
             .weight(weight)
             .fillMaxHeight()
+            .clip(RoundedCornerShape(6.dp))
             .border(
                 1.dp,
-                if (pressed || accent) RubyPrimary.copy(alpha = 0.7f) else SurfaceBorderRuby,
+                if (pressed || accent) palette.primary.copy(alpha = 0.65f) else palette.borderSubtle,
                 RoundedCornerShape(6.dp)
             )
             .pointerInput(hidCode, repeatable) {
@@ -833,16 +1088,20 @@ private fun RowScope.PcKeyTile(
             if (shiftLabel.isNotEmpty()) {
                 Text(
                     text = shiftLabel,
-                    color = TextMuted,
-                    fontSize = 8.5.sp,
+                    color = palette.textSecondary,
+                    fontSize = 9.5.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 3.dp)
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 4.dp)
                 )
             }
             Text(
                 text = label,
-                color = if (pressed || accent) RubyPrimary else TextPrimary,
-                fontSize = if (label.length > 2) 10.5.sp else 13.sp,
+                color = if (pressed || accent) palette.primary else palette.pcKeyPressedText,
+                fontSize = when {
+                    label.length > 3 -> 10.5.sp
+                    label.length > 1 -> 12.sp
+                    else -> 14.5.sp
+                },
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 softWrap = false,
@@ -859,25 +1118,26 @@ private fun RowScope.PcModifierTile(
     weight: Float,
     onClick: () -> Unit
 ) {
+    val palette = TabRemoteTheme.palette
     Surface(
-        color = if (active) RubyPrimary else SurfaceContainerCharcoal,
+        color = if (active) palette.primary else palette.pcKeyAccentSurface,
         shape = RoundedCornerShape(6.dp),
         modifier = Modifier
             .weight(weight)
             .fillMaxHeight()
+            .clip(RoundedCornerShape(6.dp))
             .border(
                 1.dp,
-                if (active) RubyPrimary else SurfaceBorderRuby,
+                if (active) palette.primary else palette.borderAccent,
                 RoundedCornerShape(6.dp)
             )
-            .clip(RoundedCornerShape(6.dp))
             .clickable { onClick() }
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 2.dp)) {
             Text(
                 text = label,
-                color = if (active) Color.White else RubyAccent,
-                fontSize = 10.5.sp,
+                color = if (active) palette.onAccent else palette.accent,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 softWrap = false,
                 maxLines = 1
@@ -893,15 +1153,17 @@ private fun PcArrowTile(
     onTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     var pressed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Surface(
-        color = if (pressed) RubyPrimary.copy(alpha = 0.35f) else SurfaceCharcoal,
+        color = if (pressed) palette.primary.copy(alpha = 0.35f) else palette.pcKeySurface,
         shape = RoundedCornerShape(6.dp),
         modifier = modifier
             .fillMaxHeight()
-            .border(1.dp, if (pressed) RubyPrimary else SurfaceBorderRuby, RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, if (pressed) palette.primary else palette.borderSubtle, RoundedCornerShape(6.dp))
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -925,8 +1187,8 @@ private fun PcArrowTile(
             Icon(
                 imageVector = icon,
                 contentDescription = desc,
-                tint = RubyPrimary,
-                modifier = Modifier.size(16.dp)
+                tint = palette.primary,
+                modifier = Modifier.size(18.dp)
             )
         }
     }

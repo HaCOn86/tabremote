@@ -1,7 +1,11 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.bluetooth.BluetoothDevice
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,9 +37,11 @@ import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Visibility
@@ -58,13 +65,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
 import com.example.data.PairedDevice
 import com.example.model.AppRole
@@ -74,57 +81,57 @@ import com.example.model.RemoteSettings
 import com.example.network.WifiNetworkUtils
 import com.example.ui.theme.GreenSuccess
 import com.example.ui.theme.RedDanger
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.SurfaceContainerCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.TabRemoteTheme
 
+import androidx.compose.material.icons.filled.MusicNote
 @Composable
 internal fun SubPageHeader(
     title: String,
     subtitle: String,
     onBack: () -> Unit,
+    showBackButton: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(end = 46.dp),
+            .padding(end = if (showBackButton) 46.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Surface(
-            color = SurfaceCharcoal,
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-                .size(42.dp)
-                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { onBack() }
-                .testTag("settings_subpage_back_btn")
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Geri",
-                    tint = RubyPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
+        if (showBackButton) {
+            val backShape = RoundedCornerShape(10.dp)
+            Surface(
+                color = palette.surface,
+                shape = backShape,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(backShape)
+                    .border(1.dp, palette.borderAccent, backShape)
+                    .clickable { onBack() }
+                    .testTag("settings_subpage_back_btn")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Geri",
+                        tint = palette.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                color = TextPrimary,
+                color = palette.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.ExtraBold
             )
             Text(
                 text = subtitle,
-                color = TextSecondary,
+                color = palette.textSecondary,
                 fontSize = 10.5.sp
             )
         }
@@ -139,6 +146,7 @@ internal fun EditSaveLockField(
     onSave: (String) -> Unit,
     testTagPrefix: String
 ) {
+    val palette = TabRemoteTheme.palette
     var isEditing by remember { mutableStateOf(false) }
     var draft by remember(currentValue) { mutableStateOf(currentValue) }
 
@@ -150,17 +158,18 @@ internal fun EditSaveLockField(
     ) {
         Text(
             text = label,
-            color = TextSecondary,
+            color = palette.textSecondary,
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold
         )
         if (!isEditing) {
+            val containerShape = RoundedCornerShape(10.dp)
             Surface(
-                color = SurfaceContainerCharcoal,
-                shape = RoundedCornerShape(10.dp),
+                color = palette.surfaceContainer,
+                shape = containerShape,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
+                    .border(1.dp, palette.borderAccent, containerShape)
             ) {
                 Row(
                     modifier = Modifier
@@ -176,41 +185,44 @@ internal fun EditSaveLockField(
                         Icon(
                             imageVector = Icons.Default.Lock,
                             contentDescription = "Kilitli",
-                            tint = TextMuted,
+                            tint = palette.textMuted,
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = currentValue.ifBlank { "Belirlenmedi" },
-                            color = TextPrimary,
+                            color = palette.textPrimary,
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+                    val editBtnShape = RoundedCornerShape(8.dp)
                     Surface(
-                        color = RubyPrimary.copy(alpha = 0.16f),
-                        shape = RoundedCornerShape(8.dp),
+                        color = palette.primary.copy(alpha = 0.16f),
+                        shape = editBtnShape,
                         modifier = Modifier
-                            .border(1.dp, RubyPrimary.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(editBtnShape)
+                            .border(1.dp, palette.primary.copy(alpha = 0.5f), editBtnShape)
                             .clickable {
                                 draft = currentValue
                                 isEditing = true
                             }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
                             .testTag("${testTagPrefix}_edit_btn")
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
                                 contentDescription = "Düzenle",
-                                tint = RubyPrimary,
+                                tint = palette.primary,
                                 modifier = Modifier.size(13.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "Düzenle",
-                                color = RubyPrimary,
+                                color = palette.primary,
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -229,12 +241,12 @@ internal fun EditSaveLockField(
                     onValueChange = { draft = it.take(maxLength) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = SurfaceContainerCharcoal,
-                        unfocusedContainerColor = SurfaceContainerCharcoal,
-                        focusedBorderColor = RubyPrimary,
-                        unfocusedBorderColor = SurfaceBorderRuby,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
+                        focusedContainerColor = palette.surfaceContainer,
+                        unfocusedContainerColor = palette.surfaceContainer,
+                        focusedBorderColor = palette.primary,
+                        unfocusedBorderColor = palette.borderAccent,
+                        focusedTextColor = palette.textPrimary,
+                        unfocusedTextColor = palette.textPrimary
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -249,7 +261,10 @@ internal fun EditSaveLockField(
                         }
                         isEditing = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RubyPrimary),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = palette.primary,
+                        contentColor = palette.onAccent
+                    ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .height(50.dp)
@@ -258,11 +273,11 @@ internal fun EditSaveLockField(
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Kaydet",
-                        tint = Color.White,
+                        tint = palette.onAccent,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Kaydet", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Kaydet", color = palette.onAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -277,38 +292,164 @@ internal fun BluetoothSettingsSubPage(
     discoveredDevices: List<BluetoothDevice>,
     isScanningBluetooth: Boolean,
     hidDiagnostics: String?,
+    deviceTypeLabel: (BluetoothDevice) -> String = { "Bluetooth Cihazı" },
     onBack: () -> Unit,
     onRefreshBluetooth: () -> Unit,
     onToggleBluetoothScan: () -> Unit,
     onCreateDiscoverableIntent: () -> Intent,
-    onRenameBluetoothDevice: (String) -> Unit,
     onPairAndConnectBluetooth: (BluetoothDevice) -> Unit,
     onConnectDevice: (BluetoothDevice) -> Unit,
+    onUnpairDevice: (BluetoothDevice) -> Unit = {},
     onDisconnectDevice: () -> Unit,
-    onToggleFavoriteDevice: (address: String) -> Unit
+    onToggleFavoriteDevice: (address: String) -> Unit,
+    showBackButton: Boolean = true
 ) {
+    val palette = TabRemoteTheme.palette
     val context = LocalContext.current
     var deviceSearchQuery by remember { mutableStateOf("") }
+    var permissionRefreshNonce by remember { mutableStateOf(0) }
+
+    val fineLocGranted = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+
+    val nearbyGranted = remember(permissionRefreshNonce, isScanningBluetooth, bondedDevices, fineLocGranted) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                fineLocGranted
+        } else {
+            fineLocGranted
+        }
+    }
+
     val discoverableLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { }
 
+    val btPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        permissionRefreshNonce++
+        onRefreshBluetooth()
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SubPageHeader(
             title = "Bluetooth HID & Cihazlar",
-            subtitle = "Eşleşmiş cihazlar, canlı tarama ve HID yayın adı",
-            onBack = onBack
+            subtitle = "Eşleşmiş cihazlar, Nearby & Konum tarama ve HID Fare+Klavye kaydı",
+            onBack = onBack,
+            showBackButton = showBackButton
         )
 
         SettingsCard(
-            title = "HID DURUMU & YAYIN ADI",
+            title = "YAKINDAKİ CİHAZLAR & HID PROFİLİ",
+            icon = Icons.Default.Security
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val badgeShape = RoundedCornerShape(9.dp)
+                Surface(
+                    color = palette.surfaceContainer,
+                    shape = badgeShape,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            1.dp,
+                            if (nearbyGranted) GreenSuccess.copy(alpha = 0.5f) else RedDanger.copy(alpha = 0.55f),
+                            badgeShape
+                        )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (nearbyGranted) {
+                                "Bluetooth Tarama & Konum İzni Açık"
+                            } else {
+                                "Bluetooth Tarama veya Konum İzni Eksik"
+                            },
+                            color = if (nearbyGranted) GreenSuccess else RedDanger,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Birleşik Bluetooth HID SDP (Fare + Klavye + Medya) aktif • Tablet cihazı giriş aygıtı olarak tanır",
+                            color = palette.primary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (!nearbyGranted) {
+                        Button(
+                            onClick = {
+                                val reqs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    arrayOf(
+                                        Manifest.permission.BLUETOOTH_SCAN,
+                                        Manifest.permission.BLUETOOTH_CONNECT,
+                                        Manifest.permission.ACCESS_FINE_LOCATION
+                                    )
+                                } else {
+                                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+                                }
+                                btPermissionLauncher.launch(reqs)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = palette.primary,
+                                contentColor = palette.onAccent
+                            ),
+                            shape = RoundedCornerShape(9.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 44.dp)
+                        ) {
+                            Text("İzinleri Ver", color = palette.onAccent, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", context.packageName, null)
+                                )
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = palette.surfaceContainer),
+                        shape = RoundedCornerShape(9.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp)
+                            .border(1.dp, palette.borderAccent, RoundedCornerShape(9.dp))
+                    ) {
+                        Text(
+                            text = "Uygulama İzinlerini Aç",
+                            color = palette.textPrimary,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+
+        SettingsCard(
+            title = "HID DURUMU & TARAMA",
             icon = Icons.Default.Bluetooth,
             headerAction = {
                 IconButton(onClick = onRefreshBluetooth) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Bluetooth Yenile",
-                        tint = RubyPrimary,
+                        tint = palette.primary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -320,9 +461,9 @@ internal fun BluetoothSettingsSubPage(
                         is ConnectionStatus.Connected -> if (connectionStatus.isWifi) {
                             "Aktif Bağlantı (Wi-Fi): ${connectionStatus.deviceName}"
                         } else {
-                            "Bağlandı (Touchpad HID): ${connectionStatus.deviceName}"
+                            "Bağlandı (Bluetooth HID): ${connectionStatus.deviceName}"
                         }
-                        is ConnectionStatus.ReadyToPair -> "Touchpad HID Hazır: Eşleştirme veya bağlanma bekleniyor"
+                        is ConnectionStatus.ReadyToPair -> "Bluetooth HID Hazır: Eşleştirme veya bağlanma bekleniyor"
                         is ConnectionStatus.Initializing -> "Durum: HID profili başlatılıyor..."
                         is ConnectionStatus.Disconnected -> "Durum: Bağlantı kesildi"
                         is ConnectionStatus.Error -> "Durum: ${connectionStatus.message}"
@@ -330,36 +471,29 @@ internal fun BluetoothSettingsSubPage(
                     color = when (connectionStatus) {
                         is ConnectionStatus.Connected -> GreenSuccess
                         is ConnectionStatus.Error -> RedDanger
-                        else -> TextSecondary
+                        else -> palette.textSecondary
                     },
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
 
                 if (!hidDiagnostics.isNullOrBlank()) {
+                    val diagShape = RoundedCornerShape(8.dp)
                     Surface(
-                        color = RubyPrimary.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(8.dp),
+                        color = palette.primary.copy(alpha = 0.14f),
+                        shape = diagShape,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, RubyPrimary.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                            .border(1.dp, palette.primary.copy(alpha = 0.45f), diagShape)
                     ) {
                         Text(
                             text = hidDiagnostics,
-                            color = RubyPrimary,
+                            color = palette.primary,
                             fontSize = 10.sp,
                             modifier = Modifier.padding(8.dp)
                         )
                     }
                 }
-
-                EditSaveLockField(
-                    label = "Bluetooth HID Yayın Adı",
-                    currentValue = settings.customBluetoothName,
-                    maxLength = 30,
-                    onSave = onRenameBluetoothDevice,
-                    testTagPrefix = "bt_name"
-                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -368,42 +502,42 @@ internal fun BluetoothSettingsSubPage(
                     Button(
                         onClick = onToggleBluetoothScan,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isScanningBluetooth) RubyPrimary.copy(alpha = 0.24f) else SurfaceContainerCharcoal
+                            containerColor = if (isScanningBluetooth) palette.primary.copy(alpha = 0.24f) else palette.surfaceContainer
                         ),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
-                            .border(1.dp, RubyPrimary.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                            .height(46.dp)
+                            .border(1.dp, palette.primary.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
                             .testTag("bt_live_scan_btn")
                     ) {
                         if (isScanningBluetooth) {
                             CircularProgressIndicator(
-                                color = RubyPrimary,
+                                color = palette.primary,
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Taranıyor (Durdur)", color = RubyPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("Taranıyor (Durdur)", color = palette.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         } else {
-                            Icon(Icons.Default.Search, contentDescription = null, tint = RubyPrimary, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.Search, contentDescription = null, tint = palette.primary, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(5.dp))
-                            Text("Cihazları Tara", color = RubyPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("Cihazları Tara", color = palette.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
                     Button(
                         onClick = { discoverableLauncher.launch(onCreateDiscoverableIntent()) },
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceContainerCharcoal),
+                        colors = ButtonDefaults.buttonColors(containerColor = palette.surfaceContainer),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
-                            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
+                            .height(46.dp)
+                            .border(1.dp, palette.borderAccent, RoundedCornerShape(10.dp))
                     ) {
-                        Icon(Icons.Default.Visibility, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Visibility, contentDescription = null, tint = palette.textPrimary, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(5.dp))
-                        Text("120sn Görünür Yap", color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("120sn Görünür Yap", color = palette.textPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -413,14 +547,14 @@ internal fun BluetoothSettingsSubPage(
                 ) {
                     Button(
                         onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceContainerCharcoal),
+                        colors = ButtonDefaults.buttonColors(containerColor = palette.surfaceContainer),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(42.dp)
-                            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
+                            .height(44.dp)
+                            .border(1.dp, palette.borderAccent, RoundedCornerShape(10.dp))
                     ) {
-                        Text("Sistem BT Ayarları", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Sistem BT Ayarları", color = palette.textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
 
                     if (connectionStatus is ConnectionStatus.Connected) {
@@ -430,7 +564,7 @@ internal fun BluetoothSettingsSubPage(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(42.dp)
+                                .height(44.dp)
                                 .border(1.dp, RedDanger.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                         ) {
                             Text("Bağlantıyı Kes", color = RedDanger, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -448,24 +582,24 @@ internal fun BluetoothSettingsSubPage(
                 OutlinedTextField(
                     value = deviceSearchQuery,
                     onValueChange = { deviceSearchQuery = it },
-                    placeholder = { Text("Kayıtlı / bulunan cihaz ara...", color = TextMuted, fontSize = 11.sp) },
+                    placeholder = { Text("Kayıtlı / bulunan cihaz ara...", color = palette.textMuted, fontSize = 11.sp) },
                     leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = "Ara", tint = TextMuted, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Search, contentDescription = "Ara", tint = palette.textMuted, modifier = Modifier.size(16.dp))
                     },
                     trailingIcon = {
                         if (deviceSearchQuery.isNotEmpty()) {
                             IconButton(onClick = { deviceSearchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Temizle", tint = TextMuted, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Clear, contentDescription = "Temizle", tint = palette.textMuted, modifier = Modifier.size(16.dp))
                             }
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = SurfaceContainerCharcoal,
-                        unfocusedContainerColor = SurfaceContainerCharcoal,
-                        focusedBorderColor = RubyPrimary,
-                        unfocusedBorderColor = SurfaceBorderRuby,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
+                        focusedContainerColor = palette.surfaceContainer,
+                        unfocusedContainerColor = palette.surfaceContainer,
+                        focusedBorderColor = palette.primary,
+                        unfocusedBorderColor = palette.borderAccent,
+                        focusedTextColor = palette.textPrimary,
+                        unfocusedTextColor = palette.textPrimary
                     ),
                     shape = RoundedCornerShape(8.dp),
                     singleLine = true,
@@ -491,7 +625,7 @@ internal fun BluetoothSettingsSubPage(
                 if (filteredBonded.isEmpty() && filteredDiscovered.isEmpty()) {
                     Text(
                         text = "Eşleşmiş cihaz yok. 'Cihazları Tara'ya basın veya tabletin Bluetooth ayarlarından telefonunuzu seçin.",
-                        color = TextMuted,
+                        color = palette.textMuted,
                         fontSize = 10.sp,
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
@@ -501,57 +635,81 @@ internal fun BluetoothSettingsSubPage(
                     @Suppress("MissingPermission")
                     val name = dev.name ?: dev.address ?: "Tablet"
                     val isFavorite = settings.favoriteDeviceAddresses.contains(dev.address)
+                    val rowShape = RoundedCornerShape(9.dp)
 
                     Surface(
-                        color = SurfaceContainerCharcoal,
-                        shape = RoundedCornerShape(8.dp),
+                        color = palette.surfaceContainer,
+                        shape = rowShape,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, if (isFavorite) RubyPrimary.copy(alpha = 0.5f) else SurfaceBorderRuby, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .border(1.dp, if (isFavorite) palette.primary.copy(alpha = 0.5f) else palette.borderAccent, rowShape)
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f).clickable { onConnectDevice(dev) }
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { onConnectDevice(dev) }
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.BluetoothConnected,
                                     contentDescription = "Cihaz",
-                                    tint = RubyPrimary,
+                                    tint = palette.primary,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(name, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                    Text("${dev.address} • Eşleşmiş", color = TextMuted, fontSize = 9.sp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(name, color = palette.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        text = "${dev.address} • ${deviceTypeLabel(dev)}",
+                                        color = palette.textMuted,
+                                        fontSize = 9.sp
+                                    )
                                 }
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = { onToggleFavoriteDevice(dev.address) },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(34.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
                                         contentDescription = "Favori",
-                                        tint = if (isFavorite) RubyPrimary else TextMuted,
+                                        tint = if (isFavorite) palette.primary else palette.textMuted,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(4.dp))
+                                IconButton(
+                                    onClick = { onUnpairDevice(dev) },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .testTag("bt_unpair_${dev.address}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LinkOff,
+                                        contentDescription = "Eşleşmeyi Kaldır",
+                                        tint = RedDanger,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(3.dp))
                                 Button(
                                     onClick = { onConnectDevice(dev) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = RubyPrimary),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier.height(28.dp)
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = palette.primary,
+                                        contentColor = palette.onAccent
+                                    ),
+                                    shape = RoundedCornerShape(7.dp),
+                                    modifier = Modifier.height(34.dp)
                                 ) {
-                                    Text("Bağlan", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("Bağlan", color = palette.onAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -561,7 +719,7 @@ internal fun BluetoothSettingsSubPage(
                 if (filteredDiscovered.isNotEmpty()) {
                     Text(
                         text = "YAKINDA BULUNAN CİHAZLAR",
-                        color = RubyPrimary,
+                        color = palette.primary,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.8.sp
@@ -569,30 +727,35 @@ internal fun BluetoothSettingsSubPage(
                     filteredDiscovered.forEach { dev ->
                         @Suppress("MissingPermission")
                         val name = dev.name ?: dev.address ?: "Bilinmeyen Cihaz"
+                        val discShape = RoundedCornerShape(9.dp)
                         Surface(
-                            color = SurfaceContainerCharcoal,
-                            shape = RoundedCornerShape(8.dp),
+                            color = palette.surfaceContainer,
+                            shape = discShape,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .border(1.dp, palette.borderAccent, discShape)
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(name, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                    Text(dev.address, color = TextMuted, fontSize = 9.sp)
+                                    Text(name, color = palette.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    Text(dev.address, color = palette.textMuted, fontSize = 9.sp)
                                 }
                                 Button(
                                     onClick = { onPairAndConnectBluetooth(dev) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = RubyPrimary),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier.height(28.dp)
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = palette.primary,
+                                        contentColor = palette.onAccent
+                                    ),
+                                    shape = RoundedCornerShape(7.dp),
+                                    modifier = Modifier.height(34.dp)
                                 ) {
-                                    Text("Eşle & Bağlan", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("Eşle & Bağlan", color = palette.onAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -612,6 +775,7 @@ internal fun GoogleAccountDevicesSubPage(
     localDeviceId: String,
     localWifiIp: String,
     accessibilityEnabled: Boolean,
+    notificationListenerEnabled: Boolean = false,
     isReceiverRunning: Boolean,
     connectedControllerName: String?,
     cloudDevices: List<PairedDevice>,
@@ -624,8 +788,10 @@ internal fun GoogleAccountDevicesSubPage(
     onDisconnectDevice: () -> Unit,
     onOpenPermissionWizard: () -> Unit,
     onGoogleAccountLinked: () -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    showBackButton: Boolean = true
 ) {
+    val palette = TabRemoteTheme.palette
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
@@ -639,12 +805,14 @@ internal fun GoogleAccountDevicesSubPage(
         cloudDevices.filter { it.id != localDeviceId && it.role != PairedDevice.ROLE_RECEIVER }
     }
     val isGoogleSignedIn = authSessionMode == AuthSessionMode.GOOGLE && userEmail.isNotBlank()
+    val showReceiverStatusBox = isGoogleSignedIn || settings.appRole == AppRole.RECEIVER
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SubPageHeader(
             title = "Google Hesabı & Cihazlar",
             subtitle = "Bulut cihaz eşleştirme, IP senkronizasyonu ve Alıcı modu",
-            onBack = onBack
+            onBack = onBack,
+            showBackButton = showBackButton
         )
 
         SettingsCard(
@@ -652,17 +820,20 @@ internal fun GoogleAccountDevicesSubPage(
             icon = Icons.Default.AccountCircle,
             headerAction = {
                 if (isGoogleSignedIn) {
+                    val signOutShape = RoundedCornerShape(8.dp)
                     Surface(
                         color = RedDanger.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = signOutShape,
                         modifier = Modifier
-                            .border(1.dp, RedDanger.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(signOutShape)
+                            .border(1.dp, RedDanger.copy(alpha = 0.45f), signOutShape)
                             .clickable { onSignOut() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
                             .testTag("sign_out_btn")
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Logout,
                                 contentDescription = "Çıkış Yap",
@@ -686,13 +857,13 @@ internal fun GoogleAccountDevicesSubPage(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = userDisplayName.ifBlank { "Google Hesabı Bağlı" },
-                                color = TextPrimary,
+                                color = palette.textPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = userEmail,
-                                color = TextSecondary,
+                                color = palette.textSecondary,
                                 fontSize = 10.5.sp
                             )
                         }
@@ -700,7 +871,7 @@ internal fun GoogleAccountDevicesSubPage(
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = "Cihaz Durumunu Yenile",
-                                tint = RubyPrimary,
+                                tint = palette.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -716,7 +887,7 @@ internal fun GoogleAccountDevicesSubPage(
                 } else {
                     Text(
                         text = "Şu anda ${authSessionMode.label} oturumuyla devam ediyorsunuz. Tabletinizdeki Alıcı Modu ile otomatik Wi-Fi eşleşmesi için şimdi Google hesabınızı bağlayabilirsiniz.",
-                        color = TextSecondary,
+                        color = palette.textSecondary,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
                     )
@@ -749,7 +920,10 @@ internal fun GoogleAccountDevicesSubPage(
                             )
                         },
                         enabled = !isLinkingGoogle,
-                        colors = ButtonDefaults.buttonColors(containerColor = RubyPrimary),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = palette.primary,
+                            contentColor = palette.onAccent
+                        ),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -757,21 +931,21 @@ internal fun GoogleAccountDevicesSubPage(
                             .testTag("link_google_account_btn")
                     ) {
                         if (isLinkingGoogle) {
-                            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            CircularProgressIndicator(color = palette.onAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Bağlanıyor...", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Bağlanıyor...", color = palette.onAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         } else {
-                            Text("Google Hesabı Bağla", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text("Google Hesabı Bağla", color = palette.onAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
                     OutlinedButton(
                         onClick = onSignOut,
                         shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorderRuby),
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                        border = androidx.compose.foundation.BorderStroke(1.dp, palette.borderAccent),
+                        modifier = Modifier.fillMaxWidth().height(44.dp)
                     ) {
-                        Text("Giriş Ekranına Dön", color = TextSecondary, fontSize = 11.sp)
+                        Text("Giriş Ekranına Dön", color = palette.textSecondary, fontSize = 11.sp)
                     }
                 }
             }
@@ -791,87 +965,79 @@ internal fun GoogleAccountDevicesSubPage(
                 )
                 Text(
                     text = settings.appRole.subtitle,
-                    color = TextSecondary,
+                    color = palette.textSecondary,
                     fontSize = 10.sp
                 )
 
-                Surface(
-                    color = SurfaceContainerCharcoal,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(
-                            1.dp,
-                            if (accessibilityEnabled) GreenSuccess.copy(alpha = 0.55f) else RubyPrimary.copy(alpha = 0.55f),
-                            RoundedCornerShape(10.dp)
-                        )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        if (settings.appRole == AppRole.RECEIVER) {
-                            Text(
-                                text = if (isReceiverRunning) {
-                                    "Sunucu Aktif (${localWifiIp.ifBlank { "IP Bekleniyor" }}:${WifiNetworkUtils.DEFAULT_PORT})"
-                                } else {
-                                    "Wi-Fi Sunucusu Başlatılıyor..."
-                                },
-                                color = if (isReceiverRunning) GreenSuccess else TextPrimary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Text(
-                                text = if (!connectedControllerName.isNullOrBlank()) {
-                                    "Bağlı Telefon: $connectedControllerName"
-                                } else {
-                                    "Telefonunuzda aynı Google hesabıyla oturum açıp Wi-Fi Bağlan'a dokunun."
-                                },
-                                color = TextSecondary,
-                                fontSize = 10.sp
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.AccessibilityNew,
-                                contentDescription = "Erişilebilirlik",
-                                tint = if (accessibilityEnabled) GreenSuccess else RedDanger,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (accessibilityEnabled) {
-                                    "Erişilebilirlik Aktif — Özel Fare İmleci Hazır"
-                                } else {
-                                    "Erişilebilirlik Kapalı (Android 13 Kısıtlı Ayar / İzin Denetimi)"
-                                },
-                                color = if (accessibilityEnabled) GreenSuccess else RedDanger,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        Button(
-                            onClick = onOpenPermissionWizard,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (accessibilityEnabled) SurfaceCharcoal else RubyPrimary
-                            ),
-                            shape = RoundedCornerShape(9.dp),
+                if (showReceiverStatusBox) {
+                    if (settings.appRole == AppRole.RECEIVER) {
+                        val statusShape = RoundedCornerShape(10.dp)
+                        Surface(
+                            color = palette.surfaceContainer,
+                            shape = statusShape,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, RubyPrimary.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
-                                .testTag("open_accessibility_settings_btn")
+                                .border(
+                                    1.dp,
+                                    if (isReceiverRunning) GreenSuccess.copy(alpha = 0.45f) else palette.borderAccent,
+                                    statusShape
+                                )
                         ) {
-                            Text(
-                                text = if (accessibilityEnabled) "Erişilebilirlik & İzin Durumunu Aç" else "Erişilebilirlik & Kısıtlı Ayar Rehberi",
-                                color = if (accessibilityEnabled) RubyPrimary else Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = if (isReceiverRunning) {
+                                        "Sunucu Aktif (${localWifiIp.ifBlank { "IP Bekleniyor" }}:${WifiNetworkUtils.DEFAULT_PORT})"
+                                    } else {
+                                        "Wi-Fi Sunucusu Başlatılıyor..."
+                                    },
+                                    color = if (isReceiverRunning) GreenSuccess else palette.textPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = if (!connectedControllerName.isNullOrBlank()) {
+                                        "Bağlı Telefon: $connectedControllerName"
+                                    } else {
+                                        "Telefonunuzda aynı Google hesabıyla oturum açıp Wi-Fi Bağlan'a dokunun."
+                                    },
+                                    color = palette.textSecondary,
+                                    fontSize = 10.sp
+                                )
+                            }
                         }
                     }
+
+                    SettingsNavEntryTile(
+                        icon = Icons.Default.AccessibilityNew,
+                        title = "İzinler & Android 13 Kısıtlı Ayar Kontrolü",
+                        subtitle = if (accessibilityEnabled) {
+                            "Erişilebilirlik aktif • Alıcı ve özel imleç denetimi hazır"
+                        } else {
+                            "Erişilebilirlik kapalı — Alıcı modda gerekli, açmak için dokunun"
+                        },
+                        badgeColor = if (accessibilityEnabled) GreenSuccess else RedDanger,
+                        onClick = onOpenPermissionWizard,
+                        testTag = "open_accessibility_settings_btn"
+                    )
+
+                    SettingsNavEntryTile(
+                        icon = Icons.Default.MusicNote,
+                        title = "Bildirim Dinleme İzni (Çalan Medya)",
+                        subtitle = if (notificationListenerEnabled) {
+                            "Aktif • Wi-Fi Kontrol sekmesine tam şarkı/sanatçı bilgisi gönderir"
+                        } else {
+                            "Kapalı — Çalan medya adını görmek için açın"
+                        },
+                        badgeColor = if (notificationListenerEnabled) GreenSuccess else RedDanger,
+                        onClick = {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        },
+                        testTag = "open_notification_listener_btn"
+                    )
                 }
             }
         }
@@ -885,7 +1051,7 @@ internal fun GoogleAccountDevicesSubPage(
                     if (receiverPeers.isEmpty() && allOtherPeers.isEmpty()) {
                         Text(
                             text = "Hesabınıza kayıtlı başka cihaz bulunamadı. Diğer cihazınızda da aynı Google hesabıyla giriş yapın.",
-                            color = TextMuted,
+                            color = palette.textMuted,
                             fontSize = 10.5.sp
                         )
                     } else {
@@ -894,15 +1060,16 @@ internal fun GoogleAccountDevicesSubPage(
                                 it.isWifi && it.address == "${peer.localIp}:${peer.port}"
                             } == true
 
+                            val peerShape = RoundedCornerShape(10.dp)
                             Surface(
-                                color = SurfaceContainerCharcoal,
-                                shape = RoundedCornerShape(10.dp),
+                                color = palette.surfaceContainer,
+                                shape = peerShape,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .border(
                                         1.dp,
-                                        if (isThisWifiConnected) GreenSuccess else SurfaceBorderRuby,
-                                        RoundedCornerShape(10.dp)
+                                        if (isThisWifiConnected) GreenSuccess else palette.borderAccent,
+                                        peerShape
                                     )
                             ) {
                                 Row(
@@ -920,7 +1087,7 @@ internal fun GoogleAccountDevicesSubPage(
                                             modifier = Modifier
                                                 .size(9.dp)
                                                 .background(
-                                                    if (peer.isOnline) GreenSuccess else TextMuted,
+                                                    if (peer.isOnline) GreenSuccess else palette.textMuted,
                                                     CircleShape
                                                 )
                                         )
@@ -928,14 +1095,14 @@ internal fun GoogleAccountDevicesSubPage(
                                         Column {
                                             Text(
                                                 text = peer.deviceName,
-                                                color = TextPrimary,
+                                                color = palette.textPrimary,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
                                             Text(
                                                 text = "${peer.localIp.ifBlank { "IP yok" }}:${peer.port} • " +
                                                     if (peer.accessibilityReady) "Alıcı Hazır" else "Erişilebilirlik Kapalı",
-                                                color = if (peer.accessibilityReady) TextSecondary else RedDanger,
+                                                color = if (peer.accessibilityReady) palette.textSecondary else RedDanger,
                                                 fontSize = 9.5.sp
                                             )
                                         }
@@ -947,14 +1114,14 @@ internal fun GoogleAccountDevicesSubPage(
                                             else onConnectWifiReceiver(peer)
                                         },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isThisWifiConnected) RedDanger.copy(alpha = 0.25f) else RubyPrimary
+                                            containerColor = if (isThisWifiConnected) RedDanger.copy(alpha = 0.25f) else palette.primary
                                         ),
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.height(34.dp)
                                     ) {
                                         Text(
                                             text = if (isThisWifiConnected) "Kes" else "Wi-Fi Bağlan",
-                                            color = if (isThisWifiConnected) RedDanger else Color.White,
+                                            color = if (isThisWifiConnected) RedDanger else palette.onAccent,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -966,27 +1133,29 @@ internal fun GoogleAccountDevicesSubPage(
                         if (allOtherPeers.isNotEmpty()) {
                             Text(
                                 text = "DİĞER KAYITLI CİHAZLAR (KUMANDA)",
-                                color = TextMuted,
+                                color = palette.textMuted,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.7.sp
                             )
                             allOtherPeers.forEach { dev ->
+                                val otherShape = RoundedCornerShape(8.dp)
                                 Surface(
-                                    color = SurfaceContainerCharcoal,
-                                    shape = RoundedCornerShape(8.dp),
+                                    color = palette.surfaceContainer,
+                                    shape = otherShape,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 10.dp, vertical = 7.dp)
+                                        .border(1.dp, palette.borderAccent, otherShape)
                                 ) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(dev.deviceName, color = TextPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
-                                        Text(dev.localIp.ifBlank { "Çevrimdışı" }, color = TextMuted, fontSize = 10.sp)
+                                        Text(dev.deviceName, color = palette.textPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                                        Text(dev.localIp.ifBlank { "Çevrimdışı" }, color = palette.textMuted, fontSize = 10.sp)
                                     }
                                 }
                             }

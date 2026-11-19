@@ -43,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,13 +64,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AirMouseScrollMode
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.ScrollGutterBg
-import com.example.ui.theme.ScrollGutterThumb
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.TabRemoteTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -77,7 +72,7 @@ import kotlin.math.roundToInt
 
 /**
  * Unified Horizontal Pan Rail shared across Touchpad, Air Mouse & Control screens.
- * Features left/right step arrows, characteristic notched groove ticks, and a spring thumb.
+ * Uses crisp opaque surfaces with neutral borders at rest and accent fill only while actively dragged.
  */
 @Composable
 fun UnifiedHorizontalPanRail(
@@ -85,17 +80,20 @@ fun UnifiedHorizontalPanRail(
     onPan: (deltaX: Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    val grooveColor = palette.borderSubtle
+
     BoxWithConstraints(
         modifier = modifier
             .height(38.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(ScrollGutterBg)
-            .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(10.dp))
+            .background(palette.scrollGutterBg)
+            .border(1.dp, palette.borderSubtle, RoundedCornerShape(10.dp))
     ) {
         val density = LocalDensity.current
         val totalWidthPx = with(density) { maxWidth.toPx() }
         val arrowWidthPx = with(density) { 40.dp.toPx() }
-        val thumbWidthPx = with(density) { 54.dp.toPx() }
+        val thumbWidthPx = with(density) { 56.dp.toPx() }
 
         val minThumbX = arrowWidthPx
         val maxThumbX = (totalWidthPx - arrowWidthPx - thumbWidthPx).coerceAtLeast(minThumbX)
@@ -103,10 +101,9 @@ fun UnifiedHorizontalPanRail(
 
         val thumbAnimatable = remember(maxWidth) { Animatable(centerThumbX) }
         val scope = rememberCoroutineScope()
+        var isDragging by remember { mutableStateOf(false) }
 
-        // Notched / grooved vertical ticks matching the vertical scroll rail aesthetic
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val grooveColor = SurfaceBorderRuby
             val step = 10.dp.toPx()
             val insetY = 9.dp.toPx()
             var x = arrowWidthPx + 8.dp.toPx()
@@ -133,22 +130,27 @@ fun UnifiedHorizontalPanRail(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Önceki",
-                tint = RubyPrimary,
+                tint = palette.textPrimary,
                 modifier = Modifier.size(18.dp)
             )
         }
 
         Surface(
-            color = ScrollGutterThumb.copy(alpha = 0.24f),
+            color = if (isDragging) palette.primary else palette.controlThumb,
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .offset { IntOffset(thumbAnimatable.value.roundToInt(), 0) }
-                .width(54.dp)
+                .width(56.dp)
                 .height(28.dp)
-                .border(1.2.dp, ScrollGutterThumb, RoundedCornerShape(8.dp))
+                .border(
+                    1.dp,
+                    if (isDragging) palette.primary else palette.borderElevated,
+                    RoundedCornerShape(8.dp)
+                )
                 .pointerInput(minThumbX, maxThumbX) {
                     detectDragGestures(
+                        onDragStart = { isDragging = true },
                         onDrag = { change, dragAmount ->
                             change.consume()
                             val nextX = (thumbAnimatable.value + dragAmount.x).coerceIn(minThumbX, maxThumbX)
@@ -156,6 +158,7 @@ fun UnifiedHorizontalPanRail(
                             onPan(dragAmount.x)
                         },
                         onDragEnd = {
+                            isDragging = false
                             scope.launch {
                                 thumbAnimatable.animateTo(
                                     targetValue = centerThumbX,
@@ -167,6 +170,7 @@ fun UnifiedHorizontalPanRail(
                             }
                         },
                         onDragCancel = {
+                            isDragging = false
                             scope.launch {
                                 thumbAnimatable.animateTo(
                                     targetValue = centerThumbX,
@@ -188,14 +192,14 @@ fun UnifiedHorizontalPanRail(
                 Icon(
                     imageVector = Icons.Default.SwapHoriz,
                     contentDescription = "Yatay Kaydır",
-                    tint = RubyPrimary,
+                    tint = if (isDragging) palette.onAccent else palette.textPrimary,
                     modifier = Modifier.size(15.dp)
                 )
                 Spacer(modifier = Modifier.width(2.dp))
                 Text(
                     text = "PAN",
-                    color = RubyPrimary,
-                    fontSize = 8.sp,
+                    color = if (isDragging) palette.onAccent else palette.textPrimary,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -213,7 +217,7 @@ fun UnifiedHorizontalPanRail(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = "Sonraki",
-                tint = RubyPrimary,
+                tint = palette.textPrimary,
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -232,45 +236,46 @@ fun UnifiedVerticalScrollRail(
     onScrollStep: (ticks: Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    val isStepMode = scrollMode == AirMouseScrollMode.STEP_BUTTONS
+
     Column(
         modifier = modifier.width(52.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Surface(
-            color = if (scrollMode == AirMouseScrollMode.STEP_BUTTONS) {
-                RubyPrimary.copy(alpha = 0.22f)
-            } else {
-                SurfaceCharcoal
-            },
+            color = if (isStepMode) palette.controlThumb else palette.surface,
             shape = RoundedCornerShape(9.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(30.dp)
+                .clip(RoundedCornerShape(9.dp))
                 .border(
                     1.dp,
-                    if (scrollMode == AirMouseScrollMode.STEP_BUTTONS) RubyPrimary else SurfaceBorderRuby,
+                    if (isStepMode) palette.primary else palette.borderSubtle,
                     RoundedCornerShape(9.dp)
                 )
-                .clip(RoundedCornerShape(9.dp))
                 .clickable { onToggleScrollMode() }
                 .testTag("vertical_scroll_mode_toggle")
         ) {
             Row(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.SwapVert,
                     contentDescription = "Kaydırma Tipi Değiştir",
-                    tint = RubyPrimary,
+                    tint = if (isStepMode) palette.primary else palette.textPrimary,
                     modifier = Modifier.size(13.dp)
                 )
                 Spacer(modifier = Modifier.width(2.dp))
                 Text(
                     text = if (scrollMode == AirMouseScrollMode.SCROLL_STRIP) "RAY" else "TUŞ",
-                    color = RubyPrimary,
+                    color = if (isStepMode) palette.primary else palette.textPrimary,
                     fontSize = 8.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     softWrap = false
@@ -334,28 +339,47 @@ private fun NotchedVerticalRailStrip(
     onScrollStep: (ticks: Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    val grooveColor = palette.borderSubtle
+
     BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(ScrollGutterBg)
-            .border(1.2.dp, SurfaceBorderRuby, RoundedCornerShape(12.dp))
+            .background(palette.scrollGutterBg)
+            .border(1.dp, palette.borderSubtle, RoundedCornerShape(12.dp))
     ) {
         val density = LocalDensity.current
         val totalHeightPx = with(density) { maxHeight.toPx() }
         val arrowAreaHeightPx = with(density) { 38.dp.toPx() }
-        val thumbHeightPx = with(density) { 52.dp.toPx() }
+        val thumbHeightPx = with(density) { 54.dp.toPx() }
 
         val minThumbY = arrowAreaHeightPx
         val maxThumbY = (totalHeightPx - arrowAreaHeightPx - thumbHeightPx).coerceAtLeast(minThumbY)
         val centerThumbY = (minThumbY + maxThumbY) / 2f
 
-        val thumbAnimatable = remember(maxHeight) { Animatable(centerThumbY) }
+        val thumbAnimatable = remember(maxWidth, maxHeight) { Animatable(centerThumbY) }
         val scope = rememberCoroutineScope()
         var accumDy by remember { mutableFloatStateOf(0f) }
+        var isDragging by remember { mutableStateOf(false) }
 
-        // Characteristic notched horizontal grooves
+        LaunchedEffect(isDragging, minThumbY, maxThumbY) {
+            if (!isDragging) return@LaunchedEffect
+            while (isActive && isDragging) {
+                val y = thumbAnimatable.value
+                val edgeThreshold = 4f
+                when {
+                    maxThumbY > minThumbY + edgeThreshold && y <= minThumbY + edgeThreshold -> {
+                        onScrollStep(1)
+                    }
+                    maxThumbY > minThumbY + edgeThreshold && y >= maxThumbY - edgeThreshold -> {
+                        onScrollStep(-1)
+                    }
+                }
+                delay(75L)
+            }
+        }
+
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val grooveColor = SurfaceBorderRuby
             val step = 12.dp.toPx()
             val insetX = 13.dp.toPx()
             var y = arrowAreaHeightPx + 8.dp.toPx()
@@ -382,22 +406,27 @@ private fun NotchedVerticalRailStrip(
             Icon(
                 imageVector = Icons.Default.KeyboardArrowUp,
                 contentDescription = "Yukarı Kaydır",
-                tint = RubyPrimary,
+                tint = palette.textPrimary,
                 modifier = Modifier.size(20.dp)
             )
         }
 
         Surface(
-            color = ScrollGutterThumb.copy(alpha = 0.25f),
+            color = if (isDragging) palette.primary else palette.controlThumb,
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .offset { IntOffset(0, thumbAnimatable.value.roundToInt()) }
-                .width(40.dp)
-                .height(52.dp)
-                .border(1.5.dp, ScrollGutterThumb, RoundedCornerShape(8.dp))
+                .width(42.dp)
+                .height(54.dp)
+                .border(
+                    1.dp,
+                    if (isDragging) palette.primary else palette.borderElevated,
+                    RoundedCornerShape(8.dp)
+                )
                 .pointerInput(minThumbY, maxThumbY) {
                     detectDragGestures(
+                        onDragStart = { isDragging = true },
                         onDrag = { change, dragAmount ->
                             change.consume()
                             val nextY = (thumbAnimatable.value + dragAmount.y).coerceIn(minThumbY, maxThumbY)
@@ -409,6 +438,7 @@ private fun NotchedVerticalRailStrip(
                             }
                         },
                         onDragEnd = {
+                            isDragging = false
                             accumDy = 0f
                             scope.launch {
                                 thumbAnimatable.animateTo(
@@ -421,6 +451,7 @@ private fun NotchedVerticalRailStrip(
                             }
                         },
                         onDragCancel = {
+                            isDragging = false
                             accumDy = 0f
                             scope.launch {
                                 thumbAnimatable.animateTo(
@@ -443,12 +474,12 @@ private fun NotchedVerticalRailStrip(
                 Icon(
                     imageVector = Icons.Default.SwapVert,
                     contentDescription = "Kaydırma Tutacı",
-                    tint = RubyPrimary,
+                    tint = if (isDragging) palette.onAccent else palette.textPrimary,
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
                     text = "KAYDIR",
-                    color = RubyPrimary,
+                    color = if (isDragging) palette.onAccent else palette.textPrimary,
                     fontSize = 6.5.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.4.sp
@@ -468,7 +499,7 @@ private fun NotchedVerticalRailStrip(
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
                 contentDescription = "Aşağı Kaydır",
-                tint = RubyPrimary,
+                tint = palette.textPrimary,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -482,6 +513,7 @@ private fun HoldScrollStepButton(
     onScrollStep: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     var isPressed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val scale by animateFloatAsState(
@@ -491,13 +523,13 @@ private fun HoldScrollStepButton(
     )
 
     Surface(
-        color = if (isPressed) RubyPrimary.copy(alpha = 0.25f) else SurfaceCharcoal,
+        color = if (isPressed) palette.primary else palette.surface,
         shape = RoundedCornerShape(10.dp),
         modifier = modifier
             .scale(scale)
             .border(
-                1.2.dp,
-                if (isPressed) RubyPrimary else SurfaceBorderRuby,
+                1.dp,
+                if (isPressed) palette.primary else palette.borderSubtle,
                 RoundedCornerShape(10.dp)
             )
             .pointerInput(Unit) {
@@ -520,19 +552,21 @@ private fun HoldScrollStepButton(
             }
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(2.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (isPressed) RubyPrimary else TextPrimary,
+                tint = if (isPressed) palette.onAccent else palette.textPrimary,
                 modifier = Modifier.size(22.dp)
             )
             Text(
                 text = label,
-                color = if (isPressed) RubyPrimary else TextSecondary,
+                color = if (isPressed) palette.onAccent else palette.textSecondary,
                 fontSize = 7.5.sp,
                 fontWeight = FontWeight.Bold,
                 softWrap = false

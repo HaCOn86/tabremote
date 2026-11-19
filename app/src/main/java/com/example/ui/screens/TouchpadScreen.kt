@@ -9,12 +9,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,22 +19,16 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,55 +45,42 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
-import com.example.bluetooth.HidConstants
-import com.example.bluetooth.TouchContact
-import com.example.model.AirMouseScrollMode
-import com.example.model.ButtonPosition
-import com.example.model.HidProfileMode
+import com.example.model.AppRole
+import com.example.model.HorizontalPanPosition
 import com.example.model.MouseButton
 import com.example.model.NavDockItemId
 import com.example.model.RemoteSettings
 import com.example.model.ScrollSide
-import com.example.ui.components.DockOrderEditorPanel
 import com.example.ui.components.ExpressiveDockRow
+import com.example.ui.components.ReceiverLockedControlContainer
 import com.example.ui.components.UnifiedHorizontalPanRail
 import com.example.ui.components.UnifiedVerticalScrollRail
 import com.example.ui.components.expressivePressDetect
-import com.example.ui.theme.RubyAccent
-import com.example.ui.theme.RubyPrimary
-import com.example.ui.theme.RubySecondary
-import com.example.ui.theme.SurfaceBorderRuby
-import com.example.ui.theme.SurfaceCharcoal
-import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
-import com.example.ui.theme.TextSecondary
-import com.example.ui.theme.TrackpadGridDot
-import com.example.ui.theme.TrackpadSurface
+import com.example.ui.theme.TabRemoteTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.hypot
-import kotlin.math.roundToInt
 
 @Composable
 fun TouchpadScreen(
     settings: RemoteSettings,
     isWifiMode: Boolean = false,
-    onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
+    isTabletLayout: Boolean = false,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
     onScrollGutterDrag: (deltaY: Float) -> Unit,
     onTwoFingerVerticalScroll: (deltaY: Float) -> Unit = onScrollGutterDrag,
+    onTwoFingerGestureEnd: () -> Unit = {},
     onClassicPinchZoomStep: (pinchDelta: Float) -> Unit = {},
     onClassicPinchZoomEnd: () -> Unit = {},
     onScrollStep: (ticks: Int) -> Unit,
@@ -110,110 +89,271 @@ fun TouchpadScreen(
     onTwoFingerHorizontalSwipe: (deltaX: Float) -> Unit,
     onHorizontalStep: (direction: Int) -> Unit,
     onTrackpadTap: () -> Unit,
+    onTouchpadHoldStart: () -> Unit = {},
+    onTouchpadHoldEnd: () -> Unit = {},
     onMouseButtonClick: (MouseButton) -> Unit,
     onMouseButtonDown: (MouseButton) -> Unit,
     onMouseButtonUp: (MouseButton) -> Unit,
     onBackClick: () -> Unit,
     onHomeClick: () -> Unit,
     onRecentAppsClick: () -> Unit,
-    onMoveNavDockItem: (index: Int, delta: Int) -> Unit = { _, _ -> },
-    onToggleNavDockHidden: (NavDockItemId) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(top = 4.dp)
-            .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+    val isLockedForReceiver = settings.appRole == AppRole.RECEIVER
+    ReceiverLockedControlContainer(
+        isLockedForReceiver = isLockedForReceiver,
+        modifier = modifier.fillMaxSize()
     ) {
-        if (settings.buttonPosition == ButtonPosition.TOP) {
-            MouseButtonsBar(
-                settings = settings,
-                onMouseButtonClick = onMouseButtonClick,
-                onMouseButtonDown = onMouseButtonDown,
-                onMouseButtonUp = onMouseButtonUp,
-                modifier = Modifier.padding(end = 46.dp)
-            )
-        }
-
-        if (settings.showHorizontalScrollGutter) {
-            UnifiedHorizontalPanRail(
-                onStep = onHorizontalStep,
-                onPan = onHorizontalPan,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(end = if (settings.buttonPosition == ButtonPosition.TOP) 0.dp else 46.dp)
-            )
-        }
-
+    if (isTabletLayout) {
+        val railOnLeft = settings.scrollSide == ScrollSide.LEFT
+        val showVerticalRail = settings.scrollSide != ScrollSide.HIDDEN
         Row(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(top = 6.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (settings.scrollSide == ScrollSide.LEFT) {
-                UnifiedVerticalScrollRail(
-                    scrollMode = settings.airMouseScrollMode,
-                    onToggleScrollMode = onToggleScrollMode,
-                    onScrollDrag = onScrollGutterDrag,
-                    onScrollStep = onScrollStep,
-                    modifier = Modifier.fillMaxHeight().padding(end = 6.dp)
+            // LEFT PANE on Tablet/Landscape: Mouse click tiles + Nav Dock
+            Column(
+                modifier = Modifier
+                    .weight(0.64f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MorphableMouseButtonTile(
+                        title = "SOL TIK",
+                        compactSubtitle = "Seç / Sürükle",
+                        expandedSubtitle = "SOL TIKLAMA",
+                        morphFraction = 0.65f,
+                        accentColor = TabRemoteTheme.palette.primary,
+                        onClick = { onMouseButtonClick(MouseButton.LEFT) },
+                        onDown = { onMouseButtonDown(MouseButton.LEFT) },
+                        onUp = { onMouseButtonUp(MouseButton.LEFT) },
+                        modifier = Modifier
+                            .weight(1.25f)
+                            .fillMaxWidth()
+                            .testTag("mouse_btn_left")
+                    )
+
+                    if (settings.showMiddleClick) {
+                        MorphableMouseButtonTile(
+                            title = "ORTA",
+                            compactSubtitle = "Tekerlek",
+                            expandedSubtitle = "ORTA TIK",
+                            morphFraction = 0.35f,
+                            accentColor = TabRemoteTheme.palette.accent,
+                            onClick = { onMouseButtonClick(MouseButton.MIDDLE) },
+                            onDown = { onMouseButtonDown(MouseButton.MIDDLE) },
+                            onUp = { onMouseButtonUp(MouseButton.MIDDLE) },
+                            modifier = Modifier
+                                .weight(0.75f)
+                                .fillMaxWidth()
+                                .testTag("mouse_btn_middle")
+                        )
+                    }
+
+                    if (settings.showRightClick) {
+                        MorphableMouseButtonTile(
+                            title = "SAĞ TIK",
+                            compactSubtitle = "Menü",
+                            expandedSubtitle = "SAĞ TIKLAMA",
+                            morphFraction = 0.65f,
+                            accentColor = TabRemoteTheme.palette.primary,
+                            onClick = { onMouseButtonClick(MouseButton.RIGHT) },
+                            onDown = { onMouseButtonDown(MouseButton.RIGHT) },
+                            onUp = { onMouseButtonUp(MouseButton.RIGHT) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .testTag("mouse_btn_right")
+                        )
+                    }
+                }
+
+                CustomizableNavigationDock(
+                    settings = settings,
+                    onBackClick = onBackClick,
+                    onHomeClick = onHomeClick,
+                    onRecentAppsClick = onRecentAppsClick,
+                    onMouseButtonClick = onMouseButtonClick
                 )
             }
 
-            TrackpadSurfacePanel(
-                settings = settings,
-                isWifiMode = isWifiMode,
-                onTouchpadContacts = onTouchpadContacts,
-                onTrackpadDrag = onTrackpadDrag,
-                onTwoFingerVerticalScroll = onTwoFingerVerticalScroll,
-                onClassicPinchZoomStep = onClassicPinchZoomStep,
-                onClassicPinchZoomEnd = onClassicPinchZoomEnd,
-                onTwoFingerHorizontalSwipe = onTwoFingerHorizontalSwipe,
-                onTrackpadTap = onTrackpadTap,
-                onMouseButtonClick = onMouseButtonClick,
-                onHomeClick = onHomeClick,
-                onRecentAppsClick = onRecentAppsClick,
+            // RIGHT PANE on Tablet/Landscape: Touchpad surface + Vertical & Horizontal rails
+            Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .testTag("trackpad_canvas_area")
-            )
+                    .weight(1.36f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (settings.showHorizontalScrollGutter && settings.horizontalPanPosition == HorizontalPanPosition.ABOVE_BUTTONS) {
+                    UnifiedHorizontalPanRail(
+                        onStep = onHorizontalStep,
+                        onPan = onHorizontalPan,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
-            if (settings.scrollSide == ScrollSide.RIGHT) {
-                UnifiedVerticalScrollRail(
-                    scrollMode = settings.airMouseScrollMode,
-                    onToggleScrollMode = onToggleScrollMode,
-                    onScrollDrag = onScrollGutterDrag,
-                    onScrollStep = onScrollStep,
-                    modifier = Modifier.fillMaxHeight().padding(start = 6.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (railOnLeft && showVerticalRail) {
+                        UnifiedVerticalScrollRail(
+                            scrollMode = settings.airMouseScrollMode,
+                            onToggleScrollMode = onToggleScrollMode,
+                            onScrollDrag = onScrollGutterDrag,
+                            onScrollStep = onScrollStep,
+                            modifier = Modifier.fillMaxHeight()
+                        )
+                    }
+
+                    TrackpadSurfacePanel(
+                        settings = settings,
+                        isWifiMode = isWifiMode,
+                        onTrackpadDrag = onTrackpadDrag,
+                        onTwoFingerVerticalScroll = onTwoFingerVerticalScroll,
+                        onTwoFingerGestureEnd = onTwoFingerGestureEnd,
+                        onClassicPinchZoomStep = onClassicPinchZoomStep,
+                        onClassicPinchZoomEnd = onClassicPinchZoomEnd,
+                        onTwoFingerHorizontalSwipe = onTwoFingerHorizontalSwipe,
+                        onTrackpadTap = onTrackpadTap,
+                        onTouchpadHoldStart = onTouchpadHoldStart,
+                        onTouchpadHoldEnd = onTouchpadHoldEnd,
+                        onMouseButtonClick = onMouseButtonClick,
+                        onHomeClick = onHomeClick,
+                        onRecentAppsClick = onRecentAppsClick,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("trackpad_canvas_area")
+                    )
+
+                    if (!railOnLeft && showVerticalRail) {
+                        UnifiedVerticalScrollRail(
+                            scrollMode = settings.airMouseScrollMode,
+                            onToggleScrollMode = onToggleScrollMode,
+                            onScrollDrag = onScrollGutterDrag,
+                            onScrollStep = onScrollStep,
+                            modifier = Modifier.fillMaxHeight()
+                        )
+                    }
+                }
+
+                if (settings.showHorizontalScrollGutter && settings.horizontalPanPosition == HorizontalPanPosition.BELOW_BUTTONS) {
+                    UnifiedHorizontalPanRail(
+                        onStep = onHorizontalStep,
+                        onPan = onHorizontalPan,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(top = 4.dp)
+                .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            if (settings.showHorizontalScrollGutter && settings.horizontalPanPosition == HorizontalPanPosition.ABOVE_BUTTONS) {
+                UnifiedHorizontalPanRail(
+                    onStep = onHorizontalStep,
+                    onPan = onHorizontalPan,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 46.dp)
+                )
+            }
 
-        // Mouse Clicks sit ABOVE Navigation Dock so Touchpad aligns seamlessly with Air Mouse bottom
-        if (settings.buttonPosition == ButtonPosition.BOTTOM || settings.buttonPosition == ButtonPosition.SPLIT) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                if (settings.scrollSide == ScrollSide.LEFT) {
+                    UnifiedVerticalScrollRail(
+                        scrollMode = settings.airMouseScrollMode,
+                        onToggleScrollMode = onToggleScrollMode,
+                        onScrollDrag = onScrollGutterDrag,
+                        onScrollStep = onScrollStep,
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(end = 6.dp)
+                    )
+                }
+
+                TrackpadSurfacePanel(
+                    settings = settings,
+                    isWifiMode = isWifiMode,
+                    onTrackpadDrag = onTrackpadDrag,
+                    onTwoFingerVerticalScroll = onTwoFingerVerticalScroll,
+                    onTwoFingerGestureEnd = onTwoFingerGestureEnd,
+                    onClassicPinchZoomStep = onClassicPinchZoomStep,
+                    onClassicPinchZoomEnd = onClassicPinchZoomEnd,
+                    onTwoFingerHorizontalSwipe = onTwoFingerHorizontalSwipe,
+                    onTrackpadTap = onTrackpadTap,
+                    onTouchpadHoldStart = onTouchpadHoldStart,
+                    onTouchpadHoldEnd = onTouchpadHoldEnd,
+                    onMouseButtonClick = onMouseButtonClick,
+                    onHomeClick = onHomeClick,
+                    onRecentAppsClick = onRecentAppsClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .testTag("trackpad_canvas_area")
+                )
+
+                if (settings.scrollSide == ScrollSide.RIGHT) {
+                    UnifiedVerticalScrollRail(
+                        scrollMode = settings.airMouseScrollMode,
+                        onToggleScrollMode = onToggleScrollMode,
+                        onScrollDrag = onScrollGutterDrag,
+                        onScrollStep = onScrollStep,
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(start = 6.dp)
+                    )
+                }
+            }
+
             MouseButtonsBar(
                 settings = settings,
                 onMouseButtonClick = onMouseButtonClick,
                 onMouseButtonDown = onMouseButtonDown,
                 onMouseButtonUp = onMouseButtonUp
             )
+
+            if (settings.showHorizontalScrollGutter && settings.horizontalPanPosition == HorizontalPanPosition.BELOW_BUTTONS) {
+                UnifiedHorizontalPanRail(
+                    onStep = onHorizontalStep,
+                    onPan = onHorizontalPan,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            CustomizableNavigationDock(
+                settings = settings,
+                onBackClick = onBackClick,
+                onHomeClick = onHomeClick,
+                onRecentAppsClick = onRecentAppsClick,
+                onMouseButtonClick = onMouseButtonClick
+            )
+
+            Spacer(modifier = Modifier.height(74.dp))
         }
-
-        CustomizableNavigationDock(
-            settings = settings,
-            onBackClick = onBackClick,
-            onHomeClick = onHomeClick,
-            onRecentAppsClick = onRecentAppsClick,
-            onMouseButtonClick = onMouseButtonClick,
-            onMoveNavDockItem = onMoveNavDockItem,
-            onToggleNavDockHidden = onToggleNavDockHidden
-        )
-
-        Spacer(modifier = Modifier.height(74.dp))
+    }
     }
 }
 
@@ -221,117 +361,117 @@ fun TouchpadScreen(
 internal fun TrackpadSurfacePanel(
     settings: RemoteSettings,
     isWifiMode: Boolean,
-    onTouchpadContacts: (contacts: List<TouchContact>, clickpadPressed: Boolean) -> Unit,
     onTrackpadDrag: (dx: Float, dy: Float) -> Unit,
     onTwoFingerVerticalScroll: (deltaY: Float) -> Unit,
+    onTwoFingerGestureEnd: () -> Unit = {},
     onClassicPinchZoomStep: (pinchDelta: Float) -> Unit,
     onClassicPinchZoomEnd: () -> Unit,
     onTwoFingerHorizontalSwipe: (deltaX: Float) -> Unit,
     onTrackpadTap: () -> Unit,
+    onTouchpadHoldStart: () -> Unit = {},
+    onTouchpadHoldEnd: () -> Unit = {},
     onMouseButtonClick: (MouseButton) -> Unit,
     onHomeClick: () -> Unit,
     onRecentAppsClick: () -> Unit,
+    surfaceShape: Shape = RoundedCornerShape(16.dp),
+    topContentPadding: Dp = 12.dp,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    val dotColor = palette.trackpadGridDot
+    val glowColors = listOf(palette.primary, palette.accent, palette.secondary, Color.White)
+
     val coroutineScope = rememberCoroutineScope()
     var activeTouchPositions by remember { mutableStateOf<List<Offset>>(emptyList()) }
-    var trackpadPixelSize by remember { mutableStateOf(IntSize(1000, 1000)) }
+    var isHoldingGesture by remember { mutableStateOf(false) }
     val touchRippleAlpha = remember { Animatable(0f) }
 
-    val usePrecisionProtocol = !isWifiMode && settings.hidProfileMode == HidProfileMode.PRECISION_TOUCHPAD
+    val latestOnHoldStart by rememberUpdatedState(onTouchpadHoldStart)
+    val latestOnHoldEnd by rememberUpdatedState(onTouchpadHoldEnd)
+    val latestOnTwoFingerEnd by rememberUpdatedState(onTwoFingerGestureEnd)
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(TrackpadSurface)
-            .border(1.5.dp, SurfaceBorderRuby, RoundedCornerShape(16.dp))
-            .onSizeChanged { trackpadPixelSize = it }
-            .pointerInput(usePrecisionProtocol, settings.tapToClick, settings.pointerSensitivity) {
+            .clip(surfaceShape)
+            .background(palette.trackpadSurface)
+            .border(
+                width = 1.2.dp,
+                color = if (isHoldingGesture) palette.primary else palette.borderSubtle,
+                shape = surfaceShape
+            )
+            .pointerInput(settings.tapToClick, settings.pointerSensitivity) {
                 awaitPointerEventScope {
+                    var lastSingleTapUpMs = 0L
+
                     while (true) {
                         val downEvent = awaitPointerEvent()
                         val downPointers = downEvent.changes.filter { it.pressed }
                         if (downPointers.isEmpty()) continue
 
                         var pinchZoomActive = false
+                        var twoFingerScrollActive = false
+                        var holdActivated = false
                         val startTime = System.currentTimeMillis()
+                        val isSecondTapFast = (startTime - lastSingleTapUpMs) in 1L..320L && downPointers.size == 1
                         var maxPointers = downPointers.size
+                        var prevPointerCount = downPointers.size
                         var totalMovement = 0f
                         var lastPositions = downPointers.associate { it.id to it.position }
                         var threeFingerSwipeTriggered = false
                         var threeFingerAccumDy = 0f
 
-                        val pointerToSlot = mutableMapOf<PointerId, Int>()
-                        val usedSlots = mutableSetOf<Int>()
-                        val lastSlotCoords = mutableMapOf<Int, Pair<Int, Int>>()
-
-                        fun toLogicalCoords(pos: Offset): Pair<Int, Int> {
-                            val w = trackpadPixelSize.width.coerceAtLeast(1).toFloat()
-                            val h = trackpadPixelSize.height.coerceAtLeast(1).toFloat()
-                            val lx = ((pos.x / w) * HidConstants.TP_LOGICAL_MAX_X).roundToInt()
-                                .coerceIn(0, HidConstants.TP_LOGICAL_MAX_X)
-                            val ly = ((pos.y / h) * HidConstants.TP_LOGICAL_MAX_Y).roundToInt()
-                                .coerceIn(0, HidConstants.TP_LOGICAL_MAX_Y)
-                            return lx to ly
+                        // Double-tap + drag starts live hold mode immediately
+                        if (isSecondTapFast) {
+                            lastSingleTapUpMs = 0L
+                            holdActivated = true
+                            isHoldingGesture = true
+                            latestOnHoldStart()
                         }
 
-                        fun assignSlot(id: PointerId): Int? {
-                            pointerToSlot[id]?.let { return it }
-                            for (s in 0 until HidConstants.TP_MAX_CONTACTS) {
-                                if (s !in usedSlots) {
-                                    usedSlots.add(s)
-                                    pointerToSlot[id] = s
-                                    return s
+                        // Stationary long press (430ms) triggers press-and-hold without racing normal 360ms taps
+                        val longHoldJob = if (!holdActivated && downPointers.size == 1) {
+                            coroutineScope.launch {
+                                delay(430L)
+                                if (!holdActivated && maxPointers == 1 && totalMovement < 18f) {
+                                    holdActivated = true
+                                    isHoldingGesture = true
+                                    latestOnHoldStart()
                                 }
                             }
-                            return null
-                        }
+                        } else null
 
                         activeTouchPositions = downPointers.map { it.position }
                         coroutineScope.launch { touchRippleAlpha.snapTo(0.45f) }
-
-                        if (usePrecisionProtocol) {
-                            val initialContacts = downPointers.mapNotNull { ch ->
-                                val slot = assignSlot(ch.id) ?: return@mapNotNull null
-                                val (lx, ly) = toLogicalCoords(ch.position)
-                                lastSlotCoords[slot] = lx to ly
-                                TouchContact(slot, true, lx, ly)
-                            }
-                            if (initialContacts.isNotEmpty()) {
-                                onTouchpadContacts(initialContacts, false)
-                            }
-                        }
 
                         while (true) {
                             val moveEvent = awaitPointerEvent()
                             val currentPressed = moveEvent.changes.filter { it.pressed }
 
                             if (currentPressed.isEmpty()) {
+                                longHoldJob?.cancel()
                                 val duration = System.currentTimeMillis() - startTime
                                 if (pinchZoomActive) {
                                     pinchZoomActive = false
                                     onClassicPinchZoomEnd()
                                 }
-                                if (usePrecisionProtocol) {
-                                    val releaseContacts = pointerToSlot.values.map { slot ->
-                                        val coords = lastSlotCoords[slot] ?: (1600 to 1000)
-                                        TouchContact(slot, false, coords.first, coords.second)
-                                    }
-                                    if (releaseContacts.isNotEmpty()) {
-                                        onTouchpadContacts(releaseContacts, false)
-                                    }
-                                    onTouchpadContacts(emptyList(), false)
-                                } else {
-                                    if (duration < 280 && totalMovement < 18f) {
-                                        if (maxPointers == 1) {
-                                            onTrackpadTap()
-                                        } else if (maxPointers == 2) {
-                                            onMouseButtonClick(MouseButton.RIGHT)
-                                        }
+                                if (twoFingerScrollActive) {
+                                    twoFingerScrollActive = false
+                                    latestOnTwoFingerEnd()
+                                }
+                                if (holdActivated) {
+                                    holdActivated = false
+                                    isHoldingGesture = false
+                                    latestOnHoldEnd()
+                                } else if (duration <= 360L && totalMovement < 22f) {
+                                    if (maxPointers == 1) {
+                                        lastSingleTapUpMs = System.currentTimeMillis()
+                                        onTrackpadTap()
+                                    } else if (maxPointers == 2) {
+                                        onMouseButtonClick(MouseButton.RIGHT)
                                     }
                                 }
 
-                                if (duration < 280 && totalMovement < 18f && maxPointers == 1 && settings.tapToClick) {
+                                if (!holdActivated && duration <= 360L && totalMovement < 22f && maxPointers == 1 && settings.tapToClick) {
                                     coroutineScope.launch {
                                         touchRippleAlpha.snapTo(0.75f)
                                         touchRippleAlpha.animateTo(0f, tween(240))
@@ -348,98 +488,108 @@ internal fun TrackpadSurfacePanel(
 
                             if (currentPressed.size > maxPointers) {
                                 maxPointers = currentPressed.size
+                                longHoldJob?.cancel()
                             }
                             activeTouchPositions = currentPressed.map { it.position }
 
-                            if (usePrecisionProtocol) {
-                                val activeIds = currentPressed.map { it.id }.toSet()
-                                val liftedIds = pointerToSlot.keys.filter { it !in activeIds }
-                                val contactsToSend = mutableListOf<TouchContact>()
-
-                                for (id in liftedIds) {
-                                    val slot = pointerToSlot.remove(id)
-                                    if (slot != null) {
-                                        usedSlots.remove(slot)
-                                        val coords = lastSlotCoords.remove(slot) ?: (1600 to 1000)
-                                        contactsToSend.add(TouchContact(slot, false, coords.first, coords.second))
-                                    }
-                                }
-
-                                currentPressed.forEach { change ->
-                                    val prevPos = lastPositions[change.id] ?: change.position
-                                    totalMovement += abs(change.position.x - prevPos.x) + abs(change.position.y - prevPos.y)
-                                    change.consume()
-
-                                    val slot = assignSlot(change.id)
-                                    if (slot != null) {
-                                        val (lx, ly) = toLogicalCoords(change.position)
-                                        lastSlotCoords[slot] = lx to ly
-                                        contactsToSend.add(TouchContact(slot, true, lx, ly))
-                                    }
-                                }
-
-                                if (contactsToSend.isNotEmpty()) {
-                                    onTouchpadContacts(contactsToSend, false)
-                                }
-                            } else {
-                                if (currentPressed.size == 1) {
+                            // Reset coordinate baselines cleanly when finger count transitions (prevents 2->1 lift cursor jump)
+                            if (currentPressed.size != prevPointerCount) {
+                                if (prevPointerCount >= 2 && currentPressed.size == 1) {
                                     if (pinchZoomActive) {
                                         pinchZoomActive = false
                                         onClassicPinchZoomEnd()
                                     }
-                                    val change = currentPressed[0]
-                                    val prevPos = lastPositions[change.id] ?: change.position
-                                    val dx = change.position.x - prevPos.x
-                                    val dy = change.position.y - prevPos.y
-                                    totalMovement += abs(dx) + abs(dy)
-                                    change.consume()
-                                    onTrackpadDrag(dx, dy)
-                                } else if (currentPressed.size == 2) {
-                                    val p0 = currentPressed[0]
-                                    val p1 = currentPressed[1]
-                                    val prev0 = lastPositions[p0.id] ?: p0.position
-                                    val prev1 = lastPositions[p1.id] ?: p1.position
-
-                                    val prevDist = hypot((prev0.x - prev1.x).toDouble(), (prev0.y - prev1.y).toDouble())
-                                    val currDist = hypot((p0.position.x - p1.position.x).toDouble(), (p0.position.y - p1.position.y).toDouble())
-                                    val pinchDelta = (currDist - prevDist).toFloat()
-
-                                    val avgDx = ((p0.position.x - prev0.x) + (p1.position.x - prev1.x)) / 2f
-                                    val avgDy = ((p0.position.y - prev0.y) + (p1.position.y - prev1.y)) / 2f
-                                    totalMovement += abs(avgDx) + abs(avgDy)
-
-                                    p0.consume()
-                                    p1.consume()
-
-                                    if (abs(pinchDelta) > 4.5f && abs(pinchDelta) > abs(avgDx) + abs(avgDy) * 0.9f) {
-                                        pinchZoomActive = true
-                                        onClassicPinchZoomStep(pinchDelta)
-                                    } else if (abs(avgDx) > abs(avgDy) * 1.15f && abs(avgDx) > 3f) {
-                                        onTwoFingerHorizontalSwipe(avgDx)
-                                    } else if (abs(avgDy) > 2f) {
-                                        // Natural 2-finger scroll: swipe UP (avgDy < 0) moves page DOWN
-                                        onTwoFingerVerticalScroll(avgDy)
+                                    if (twoFingerScrollActive) {
+                                        twoFingerScrollActive = false
+                                        latestOnTwoFingerEnd()
                                     }
-                                } else if (currentPressed.size >= 3) {
-                                    if (pinchZoomActive) {
-                                        pinchZoomActive = false
-                                        onClassicPinchZoomEnd()
+                                }
+                                prevPointerCount = currentPressed.size
+                                lastPositions = currentPressed.associate { it.id to it.position }
+                                currentPressed.forEach { it.consume() }
+                                continue
+                            }
+
+                            if (currentPressed.size == 1) {
+                                if (pinchZoomActive) {
+                                    pinchZoomActive = false
+                                    onClassicPinchZoomEnd()
+                                }
+                                if (twoFingerScrollActive) {
+                                    twoFingerScrollActive = false
+                                    latestOnTwoFingerEnd()
+                                }
+                                val change = currentPressed[0]
+                                val prevPos = lastPositions[change.id] ?: change.position
+                                val dx = change.position.x - prevPos.x
+                                val dy = change.position.y - prevPos.y
+                                totalMovement += abs(dx) + abs(dy)
+                                if (totalMovement > 18f && !holdActivated) {
+                                    longHoldJob?.cancel()
+                                }
+                                change.consume()
+                                onTrackpadDrag(dx, dy)
+                            } else if (currentPressed.size == 2) {
+                                longHoldJob?.cancel()
+                                if (holdActivated) {
+                                    holdActivated = false
+                                    isHoldingGesture = false
+                                    latestOnHoldEnd()
+                                }
+                                val p0 = currentPressed[0]
+                                val p1 = currentPressed[1]
+                                val prev0 = lastPositions[p0.id] ?: p0.position
+                                val prev1 = lastPositions[p1.id] ?: p1.position
+
+                                val prevDist = hypot((prev0.x - prev1.x).toDouble(), (prev0.y - prev1.y).toDouble())
+                                val currDist = hypot((p0.position.x - p1.position.x).toDouble(), (p0.position.y - p1.position.y).toDouble())
+                                val pinchDelta = (currDist - prevDist).toFloat()
+
+                                val avgDx = ((p0.position.x - prev0.x) + (p1.position.x - prev1.x)) / 2f
+                                val avgDy = ((p0.position.y - prev0.y) + (p1.position.y - prev1.y)) / 2f
+                                totalMovement += abs(avgDx) + abs(avgDy)
+
+                                p0.consume()
+                                p1.consume()
+
+                                if (abs(pinchDelta) > 4.2f && abs(pinchDelta) > (abs(avgDx) + abs(avgDy)) * 0.85f) {
+                                    if (twoFingerScrollActive) {
+                                        twoFingerScrollActive = false
+                                        latestOnTwoFingerEnd()
                                     }
-                                    val avgDy = currentPressed.map { ch ->
-                                        val prev = lastPositions[ch.id] ?: ch.position
-                                        ch.position.y - prev.y
-                                    }.average().toFloat()
-                                    totalMovement += abs(avgDy)
-                                    currentPressed.forEach { it.consume() }
-                                    threeFingerAccumDy += avgDy
-                                    if (!threeFingerSwipeTriggered) {
-                                        if (threeFingerAccumDy < -70f) {
-                                            threeFingerSwipeTriggered = true
-                                            onRecentAppsClick()
-                                        } else if (threeFingerAccumDy > 70f) {
-                                            threeFingerSwipeTriggered = true
-                                            onHomeClick()
-                                        }
+                                    pinchZoomActive = true
+                                    onClassicPinchZoomStep(pinchDelta)
+                                } else if (abs(avgDx) > abs(avgDy) * 1.15f && abs(avgDx) > 2.2f) {
+                                    twoFingerScrollActive = true
+                                    onTwoFingerHorizontalSwipe(avgDx)
+                                } else if (abs(avgDy) > 1.6f) {
+                                    twoFingerScrollActive = true
+                                    onTwoFingerVerticalScroll(avgDy)
+                                }
+                            } else if (currentPressed.size >= 3) {
+                                longHoldJob?.cancel()
+                                if (pinchZoomActive) {
+                                    pinchZoomActive = false
+                                    onClassicPinchZoomEnd()
+                                }
+                                if (twoFingerScrollActive) {
+                                    twoFingerScrollActive = false
+                                    latestOnTwoFingerEnd()
+                                }
+                                val avgDy = currentPressed.map { ch ->
+                                    val prev = lastPositions[ch.id] ?: ch.position
+                                    ch.position.y - prev.y
+                                }.average().toFloat()
+                                totalMovement += abs(avgDy)
+                                currentPressed.forEach { it.consume() }
+                                threeFingerAccumDy += avgDy
+                                if (!threeFingerSwipeTriggered) {
+                                    if (threeFingerAccumDy < -70f) {
+                                        threeFingerSwipeTriggered = true
+                                        onRecentAppsClick()
+                                    } else if (threeFingerAccumDy > 70f) {
+                                        threeFingerSwipeTriggered = true
+                                        onHomeClick()
                                     }
                                 }
                             }
@@ -458,7 +608,7 @@ internal fun TrackpadSurfacePanel(
                 var y = step
                 while (y < size.height) {
                     drawCircle(
-                        color = TrackpadGridDot,
+                        color = dotColor,
                         radius = 1.6f,
                         center = Offset(x, y)
                     )
@@ -467,7 +617,6 @@ internal fun TrackpadSurfacePanel(
                 x += step
             }
 
-            val glowColors = listOf(RubyPrimary, RubyAccent, RubySecondary, Color.White)
             activeTouchPositions.forEachIndexed { idx, pos ->
                 val c = glowColors[idx % glowColors.size]
                 drawCircle(
@@ -494,28 +643,28 @@ internal fun TrackpadSurfacePanel(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 12.dp)
+                .padding(start = 18.dp, end = 18.dp, top = topContentPadding, bottom = 12.dp)
         ) {
             Text(
                 text = when {
+                    isHoldingGesture -> "PARMAK BASILI TUTULUYOR / SÜRÜKLENİYOR"
                     isWifiMode -> "WI-FI AKILLI İMLEÇ"
-                    settings.hidProfileMode == HidProfileMode.PRECISION_TOUCHPAD -> "PRECISION TOUCHPAD"
-                    else -> "TOUCHPAD (KLASİK + CTRL ZOOM)"
+                    else -> "TOUCHPAD (CTRL + SCROLL ZOOM)"
                 },
-                color = TextMuted.copy(alpha = 0.34f),
-                fontSize = 13.5.sp,
+                color = if (isHoldingGesture) palette.primary else palette.textMuted.copy(alpha = 0.4f),
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 2.4.sp,
+                letterSpacing = 1.8.sp,
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(5.dp))
             Text(
-                text = if (usePrecisionProtocol) {
-                    "1 Parmak: İmleç • 2 Parmak: Doğal Kaydır / Zoom\n3 Parmak: Ana Ekran / Son Uygulamalar"
+                text = if (isWifiMode) {
+                    "1 Parmak: İmleç • Basılı Tut / Çift Tık+Sürükle: Canlı Sürükle\n2 Parmak: Kesintisiz Kaydır & Gerçek Pinch Zoom"
                 } else {
-                    "1 Parmak: İmleç • 2 Parmak: Kaydır / Pinch Ctrl+Zoom\n3 Parmak: Ana Ekran / Son Uygulamalar"
+                    "1 Parmak: İmleç • Basılı Tut / Çift Tık+Sürükle: Seç & Sürükle\n2 Parmak: Kaydır & Ctrl+Zoom • 3 Parmak: Ana Ekran / Son"
                 },
-                color = TextMuted.copy(alpha = 0.54f),
+                color = palette.textMuted.copy(alpha = 0.56f),
                 fontSize = 9.5.sp,
                 lineHeight = 13.sp,
                 fontWeight = FontWeight.Medium,
@@ -525,8 +674,10 @@ internal fun TrackpadSurfacePanel(
     }
 }
 
-// Horizontal & Vertical rails migrated cleanly to UnifiedScrollRails.kt
-
+/**
+ * Clean Navigation Dock (Geri, Ana Ekran, Son, F1, F2).
+ * Customization & ordering are cleanly managed in Settings -> Touchpad, Hizalama & Dock.
+ */
 @Composable
 internal fun CustomizableNavigationDock(
     settings: RemoteSettings,
@@ -534,143 +685,77 @@ internal fun CustomizableNavigationDock(
     onHomeClick: () -> Unit,
     onRecentAppsClick: () -> Unit,
     onMouseButtonClick: (MouseButton) -> Unit,
-    onMoveNavDockItem: (index: Int, delta: Int) -> Unit,
-    onToggleNavDockHidden: (NavDockItemId) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showEditor by remember { mutableStateOf(false) }
-
-    val visibleItems = remember(
-        settings.navDockOrder,
-        settings.hiddenNavDockItems,
-        settings.showFunctionButtons
-    ) {
+    val allowedItems = remember(settings.navDockOrder, settings.showFunctionButtons) {
         settings.navDockOrder.filter { item ->
-            val allowedByFnToggle = settings.showFunctionButtons || (item != NavDockItemId.F1 && item != NavDockItemId.F2)
-            allowedByFnToggle && item !in settings.hiddenNavDockItems
+            settings.showFunctionButtons || (item != NavDockItemId.F1 && item != NavDockItemId.F2)
         }
     }
 
-    Column(
+    val visibleItems = remember(allowedItems, settings.hiddenNavDockItems) {
+        allowedItems.filter { it !in settings.hiddenNavDockItems }
+    }
+
+    val palette = TabRemoteTheme.palette
+    Surface(
+        color = palette.surface,
+        shape = RoundedCornerShape(12.dp),
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy)),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .border(1.dp, palette.borderSubtle, RoundedCornerShape(12.dp))
+            .testTag("customizable_navigation_dock")
     ) {
-        DockOrderEditorPanel(
-            visible = showEditor,
-            title = "ALT DOCK TUŞ SIRASI & GİZLE (BASILI TUT VEYA DÜZENLE)",
-            orderedItems = settings.navDockOrder.filter {
-                settings.showFunctionButtons || (it != NavDockItemId.F1 && it != NavDockItemId.F2)
-            },
-            hiddenItems = settings.hiddenNavDockItems,
-            labelOf = { it.defaultLabel },
-            canHide = { item -> item != NavDockItemId.HOME },
-            onMoveLeft = { idx ->
-                val activeList = settings.navDockOrder.filter {
-                    settings.showFunctionButtons || (it != NavDockItemId.F1 && it != NavDockItemId.F2)
-                }
-                val item = activeList.getOrNull(idx) ?: return@DockOrderEditorPanel
-                val realIdx = settings.navDockOrder.indexOf(item)
-                if (realIdx > 0) onMoveNavDockItem(realIdx, -1)
-            },
-            onMoveRight = { idx ->
-                val activeList = settings.navDockOrder.filter {
-                    settings.showFunctionButtons || (it != NavDockItemId.F1 && it != NavDockItemId.F2)
-                }
-                val item = activeList.getOrNull(idx) ?: return@DockOrderEditorPanel
-                val realIdx = settings.navDockOrder.indexOf(item)
-                if (realIdx in 0 until settings.navDockOrder.lastIndex) onMoveNavDockItem(realIdx, 1)
-            },
-            onToggleHidden = onToggleNavDockHidden,
-            onDone = { showEditor = false }
-        )
-
-        Surface(
-            color = SurfaceCharcoal,
-            shape = RoundedCornerShape(12.dp),
+        ExpressiveDockRow(
+            items = visibleItems,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp)
-                .border(1.dp, SurfaceBorderRuby, RoundedCornerShape(12.dp))
-                .testTag("customizable_navigation_dock")
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ExpressiveDockRow(
-                    items = visibleItems,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    horizontalSpacing = 3.dp,
-                    itemWeight = { item ->
-                        if (item == NavDockItemId.F1 || item == NavDockItemId.F2) 0.58f else 1f
-                    }
-                ) { item, _, isPressed, _, _, onPressChange ->
-                    when (item) {
-                        NavDockItemId.F1 -> FunctionBadgeTile(
-                            label = "F1",
-                            isPressed = isPressed,
-                            onPressChange = onPressChange,
-                            onLongPress = { showEditor = !showEditor },
-                            onClick = { onMouseButtonClick(MouseButton.BUTTON_4) },
-                            modifier = Modifier.fillMaxSize().testTag("dock_btn_f1")
-                        )
-                        NavDockItemId.F2 -> FunctionBadgeTile(
-                            label = "F2",
-                            isPressed = isPressed,
-                            onPressChange = onPressChange,
-                            onLongPress = { showEditor = !showEditor },
-                            onClick = { onMouseButtonClick(MouseButton.BUTTON_5) },
-                            modifier = Modifier.fillMaxSize().testTag("dock_btn_f2")
-                        )
-                        NavDockItemId.BACK -> NavDockTile(
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
-                            label = "GERİ",
-                            isPressed = isPressed,
-                            onPressChange = onPressChange,
-                            onLongPress = { showEditor = !showEditor },
-                            onClick = onBackClick,
-                            modifier = Modifier.fillMaxSize().testTag("dock_btn_back")
-                        )
-                        NavDockItemId.HOME -> NavDockTile(
-                            icon = Icons.Default.Home,
-                            label = "ANA EKRAN",
-                            isPressed = isPressed,
-                            onPressChange = onPressChange,
-                            onLongPress = { showEditor = !showEditor },
-                            onClick = onHomeClick,
-                            modifier = Modifier.fillMaxSize().testTag("dock_btn_home")
-                        )
-                        NavDockItemId.RECENT -> NavDockTile(
-                            icon = Icons.Default.Layers,
-                            label = "SON",
-                            isPressed = isPressed,
-                            onPressChange = onPressChange,
-                            onLongPress = { showEditor = !showEditor },
-                            onClick = onRecentAppsClick,
-                            modifier = Modifier.fillMaxSize().testTag("dock_btn_recent")
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(width = 30.dp, height = 34.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { showEditor = !showEditor }
-                        .testTag("edit_nav_dock_btn"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Alt Dock Sırasını Düzenle",
-                        tint = if (showEditor) RubyPrimary else TextMuted,
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
+                .height(48.dp)
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalSpacing = 4.dp,
+            itemWeight = { item ->
+                if (item == NavDockItemId.F1 || item == NavDockItemId.F2) 0.62f else 1f
+            }
+        ) { item, _, isPressed, _, _, onPressChange ->
+            when (item) {
+                NavDockItemId.F1 -> FunctionBadgeTile(
+                    label = "F1",
+                    isPressed = isPressed,
+                    onPressChange = onPressChange,
+                    onClick = { onMouseButtonClick(MouseButton.BUTTON_4) },
+                    modifier = Modifier.fillMaxSize().testTag("dock_btn_f1")
+                )
+                NavDockItemId.F2 -> FunctionBadgeTile(
+                    label = "F2",
+                    isPressed = isPressed,
+                    onPressChange = onPressChange,
+                    onClick = { onMouseButtonClick(MouseButton.BUTTON_5) },
+                    modifier = Modifier.fillMaxSize().testTag("dock_btn_f2")
+                )
+                NavDockItemId.BACK -> NavDockTile(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    label = "GERİ",
+                    isPressed = isPressed,
+                    onPressChange = onPressChange,
+                    onClick = onBackClick,
+                    modifier = Modifier.fillMaxSize().testTag("dock_btn_back")
+                )
+                NavDockItemId.HOME -> NavDockTile(
+                    icon = Icons.Default.Home,
+                    label = "ANA EKRAN",
+                    isPressed = isPressed,
+                    onPressChange = onPressChange,
+                    onClick = onHomeClick,
+                    modifier = Modifier.fillMaxSize().testTag("dock_btn_home")
+                )
+                NavDockItemId.RECENT -> NavDockTile(
+                    icon = Icons.Default.Layers,
+                    label = "SON",
+                    isPressed = isPressed,
+                    onPressChange = onPressChange,
+                    onClick = onRecentAppsClick,
+                    modifier = Modifier.fillMaxSize().testTag("dock_btn_recent")
+                )
             }
         }
     }
@@ -681,81 +766,86 @@ private fun FunctionBadgeTile(
     label: String,
     isPressed: Boolean,
     onPressChange: (Boolean) -> Unit,
-    onLongPress: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
+    val bg by animateColorAsState(
+        targetValue = if (isPressed) palette.primary else palette.surfaceContainer,
+        animationSpec = tween(120),
+        label = "fn_tile_bg"
+    )
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .border(
+                1.dp,
+                if (isPressed) palette.primary else palette.borderSubtle,
+                RoundedCornerShape(8.dp)
+            )
             .expressivePressDetect(
                 key = label,
                 onPressChange = onPressChange,
-                onLongPress = onLongPress,
                 onTap = onClick
             ),
         contentAlignment = Alignment.Center
     ) {
-        Surface(
-            color = if (isPressed) RubyPrimary else RubyPrimary.copy(alpha = 0.16f),
-            shape = RoundedCornerShape(6.dp),
-            modifier = Modifier.border(
-                1.dp,
-                if (isPressed) RubyPrimary else RubyPrimary.copy(alpha = 0.5f),
-                RoundedCornerShape(6.dp)
-            )
-        ) {
-            Text(
-                text = label,
-                color = if (isPressed) Color.White else RubyPrimary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                softWrap = false,
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-            )
-        }
+        Text(
+            text = label,
+            color = if (isPressed) palette.onAccent else palette.textPrimary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            softWrap = false
+        )
     }
 }
 
 @Composable
 private fun NavDockTile(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     label: String,
     isPressed: Boolean,
     onPressChange: (Boolean) -> Unit,
-    onLongPress: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     val bg by animateColorAsState(
-        targetValue = if (isPressed) RubyPrimary.copy(alpha = 0.22f) else Color.Transparent,
-        animationSpec = tween(140),
+        targetValue = if (isPressed) palette.primary else palette.surfaceContainer,
+        animationSpec = tween(120),
         label = "nav_tile_bg"
     )
+
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
+            .border(
+                1.dp,
+                if (isPressed) palette.primary else palette.borderSubtle,
+                RoundedCornerShape(8.dp)
+            )
             .expressivePressDetect(
                 key = label,
                 onPressChange = onPressChange,
-                onLongPress = onLongPress,
                 onTap = onClick
             )
-            .padding(horizontal = 3.dp),
+            .padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = RubyPrimary,
+            tint = if (isPressed) palette.onAccent else palette.textPrimary,
             modifier = Modifier.size(14.dp)
         )
         Spacer(modifier = Modifier.width(3.dp))
         Text(
             text = label,
-            color = if (isPressed) RubyPrimary else TextPrimary,
+            color = if (isPressed) palette.onAccent else palette.textPrimary,
             fontSize = 9.5.sp,
             fontWeight = FontWeight.Bold,
             softWrap = false,
@@ -772,6 +862,7 @@ internal fun MouseButtonsBar(
     onMouseButtonUp: (MouseButton) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -781,22 +872,26 @@ internal fun MouseButtonsBar(
         MouseButtonTile(
             title = "SOL TIK",
             subtitle = "Seç / Sürükle",
-            accentColor = RubyPrimary,
+            accentColor = palette.primary,
             onClick = { onMouseButtonClick(MouseButton.LEFT) },
             onDown = { onMouseButtonDown(MouseButton.LEFT) },
             onUp = { onMouseButtonUp(MouseButton.LEFT) },
-            modifier = Modifier.weight(1.3f).testTag("mouse_btn_left")
+            modifier = Modifier
+                .weight(1.3f)
+                .testTag("mouse_btn_left")
         )
 
         if (settings.showMiddleClick) {
             MouseButtonTile(
                 title = "ORTA",
                 subtitle = "Tekerlek Tık",
-                accentColor = RubyAccent,
+                accentColor = palette.accent,
                 onClick = { onMouseButtonClick(MouseButton.MIDDLE) },
                 onDown = { onMouseButtonDown(MouseButton.MIDDLE) },
                 onUp = { onMouseButtonUp(MouseButton.MIDDLE) },
-                modifier = Modifier.weight(0.8f).testTag("mouse_btn_middle")
+                modifier = Modifier
+                    .weight(0.8f)
+                    .testTag("mouse_btn_middle")
             )
         }
 
@@ -804,11 +899,13 @@ internal fun MouseButtonsBar(
             MouseButtonTile(
                 title = "SAĞ TIK",
                 subtitle = "Menü",
-                accentColor = RubyPrimary,
+                accentColor = palette.primary,
                 onClick = { onMouseButtonClick(MouseButton.RIGHT) },
                 onDown = { onMouseButtonDown(MouseButton.RIGHT) },
                 onUp = { onMouseButtonUp(MouseButton.RIGHT) },
-                modifier = Modifier.weight(1f).testTag("mouse_btn_right")
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("mouse_btn_right")
             )
         }
     }
@@ -826,18 +923,20 @@ internal fun MorphableMouseButtonTile(
     onUp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = TabRemoteTheme.palette
     var isPressed by remember { mutableStateOf(false) }
     val cornerDp = lerp(12f, 16f, morphFraction).dp
     val titleSizeSp = lerp(13f, 16f, morphFraction).sp
 
     Surface(
-        color = if (isPressed) accentColor.copy(alpha = 0.28f) else SurfaceCharcoal,
+        color = if (isPressed) palette.primary else palette.surface,
         shape = RoundedCornerShape(cornerDp),
         modifier = modifier
             .fillMaxHeight()
+            .clip(RoundedCornerShape(cornerDp))
             .border(
-                lerp(1.3f, 1.5f, morphFraction).dp,
-                if (isPressed) accentColor else SurfaceBorderRuby,
+                1.2.dp,
+                if (isPressed) accentColor else palette.borderSubtle,
                 RoundedCornerShape(cornerDp)
             )
             .pointerInput(Unit) {
@@ -858,29 +957,31 @@ internal fun MorphableMouseButtonTile(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
             if (morphFraction > 0.25f) {
                 Box(
                     modifier = Modifier
                         .size((10f * morphFraction).dp)
                         .background(
-                            if (isPressed) accentColor else SurfaceBorderRuby,
-                            androidx.compose.foundation.shape.CircleShape
+                            if (isPressed) palette.onAccent else palette.borderElevated,
+                            CircleShape
                         )
                 )
                 Spacer(modifier = Modifier.height((6f * morphFraction).dp))
             }
             Text(
                 text = title,
-                color = if (isPressed) accentColor else TextPrimary,
+                color = if (isPressed) palette.onAccent else palette.textPrimary,
                 fontSize = titleSizeSp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.7.sp
             )
             Text(
                 text = if (morphFraction > 0.45f) expandedSubtitle else compactSubtitle,
-                color = TextSecondary,
+                color = if (isPressed) palette.onAccent.copy(alpha = 0.85f) else palette.textSecondary,
                 fontSize = 9.5.sp,
                 maxLines = 1
             )

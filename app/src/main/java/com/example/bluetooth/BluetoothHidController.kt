@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHidDevice
-import android.bluetooth.BluetoothHidDeviceAppQosSettings
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
@@ -29,13 +28,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
-data class TouchContact(
-    val contactId: Int,
-    val tipDown: Boolean,
-    val x: Int,
-    val y: Int
-)
-
+/**
+ * Clean Bluetooth HID Device controller supporting:
+ * Report ID 1 (Mouse) + 2 (Keyboard) + 3 (Consumer Control) with SUBCLASS1_COMBO SDP
+ * and async unregister -> register state recovery so targets classify the device as a
+ * wireless touchpad & keyboard rather than internet tethering.
+ */
 class BluetoothHidController(private val context: Context) {
 
     private val tag = "BluetoothHidController"
@@ -46,18 +44,13 @@ class BluetoothHidController(private val context: Context) {
     val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
 
     private var hidApi28: HidApi28Delegate? = null
+    @Volatile
     private var isAppRegistered = false
+    @Volatile
     private var isProxyRequested = false
     private var isReceiverRegistered = false
-    private var activeUsePrecisionTouchpad = true
-    private var customSdpName: String = "TabRemote"
     private var pendingBondAddress: String? = null
-
-    @Volatile
-    private var tpInputMode: Byte = 0x03
-
-    @Volatile
-    private var tpSelectiveReporting: Byte = 0x03
+    private var currentButtonsMask = 0
 
     private val _connectionStatus = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Initializing)
     val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()
@@ -77,8 +70,6 @@ class BluetoothHidController(private val context: Context) {
     private val _hidDiagnostics = MutableStateFlow<String?>(null)
     val hidDiagnostics: StateFlow<String?> = _hidDiagnostics.asStateFlow()
 
-    private var currentButtonsMask = 0
-
     private val btBroadcastReceiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -86,7 +77,8 @@ class BluetoothHidController(private val context: Context) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                     if (state == BluetoothAdapter.STATE_ON) {
-                        initialize(activeUsePrecisionTouchpad, customSdpName)
+                        _hidDiagnostics.value = null
+                        initialize()
                         refreshBondedDevices()
                     } else if (state == BluetoothAdapter.STATE_OFF) {
                         isAppRegistered = false
@@ -147,33 +139,54 @@ class BluetoothHidController(private val context: Context) {
         return hidApi28 ?: HidApi28Delegate().also { hidApi28 = it }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun systemHostLabel(): String {
+        val adapterName = if (hasBluetoothPermissions()) {
+            try {
+                bluetoothAdapter?.name?.takeIf { it.isNotBlank() }
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+        val base = (adapterName ?: Build.MODEL ?: "Touchpad").trim()
+        val prefixed = if (base.startsWith("Remote", ignoreCase = true)) base else "Remote $base"
+        return prefixed.take(32)
+    }
+
     @RequiresApi(Build.VERSION_CODES.P)
     private inner class HidApi28Delegate {
         var hidDevice: BluetoothHidDevice? = null
             private set
 
+        @Volatile
+        private var pendingReregister = false
+
         fun clearProxy() {
+            pendingReregister = false
             hidDevice = null
         }
 
         private val serviceListener = object : BluetoothProfile.ServiceListener {
             override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
                 if (profile == BluetoothProfile.HID_DEVICE) {
-                    Log.d(tag, "Bluetooth HID Device profile connected")
+                    Log.d(tag, "Bluetooth HID_DEVICE profile connected")
                     hidDevice = proxy as? BluetoothHidDevice
-                    registerHidApp(activeUsePrecisionTouchpad)
+                    isProxyRequested = false
+                    registerClassicComboApp()
                     refreshBondedDevices()
                 }
             }
 
             override fun onServiceDisconnected(profile: Int) {
                 if (profile == BluetoothProfile.HID_DEVICE) {
-                    Log.d(tag, "Bluetooth HID Device profile disconnected")
+                    Log.d(tag, "Bluetooth HID_DEVICE profile disconnected")
                     hidDevice = null
                     isAppRegistered = false
                     isProxyRequested = false
-                    _connectionStatus.value = ConnectionStatus.Disconnected
                     _connectedDevice.value = null
+                    _connectionStatus.value = ConnectionStatus.Disconnected
                 }
             }
         }
@@ -181,9 +194,10 @@ class BluetoothHidController(private val context: Context) {
         private val hidCallback = object : BluetoothHidDevice.Callback() {
             override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
                 super.onAppStatusChanged(pluggedDevice, registered)
-                Log.d(tag, "onAppStatusChanged: registered=$registered, device=$pluggedDevice")
+                Log.d(tag, "onAppStatusChanged: registered=$registered, pluggedDevice=$pluggedDevice, pendingReregister=$pendingReregister")
                 isAppRegistered = registered
                 if (registered) {
+                    pendingReregister = false
                     _hidDiagnostics.value = null
                     if (pluggedDevice != null) {
                         _connectedDevice.value = pluggedDevice
@@ -196,7 +210,17 @@ class BluetoothHidController(private val context: Context) {
                         _connectionStatus.value = ConnectionStatus.ReadyToPair
                     }
                 } else {
-                    _connectionStatus.value = ConnectionStatus.Disconnected
+                    currentButtonsMask = 0
+                    _connectedDevice.value = null
+                    if (pendingReregister) {
+                        pendingReregister = false
+                        scope.launch {
+                            delay(220L)
+                            registerClassicComboApp(isRetryAfterCleanup = true)
+                        }
+                    } else {
+                        _connectionStatus.value = ConnectionStatus.Disconnected
+                    }
                 }
             }
 
@@ -205,6 +229,7 @@ class BluetoothHidController(private val context: Context) {
                 Log.d(tag, "onConnectionStateChanged: device=$device, state=$state")
                 when (state) {
                     BluetoothProfile.STATE_CONNECTED -> {
+                        currentButtonsMask = 0
                         _connectedDevice.value = device
                         _hidDiagnostics.value = null
                         _connectionStatus.value = ConnectionStatus.Connected(
@@ -217,8 +242,12 @@ class BluetoothHidController(private val context: Context) {
                         _connectionStatus.value = ConnectionStatus.Initializing
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
+                        currentButtonsMask = 0
                         _connectedDevice.value = null
-                        _connectionStatus.value = if (isAppRegistered) ConnectionStatus.ReadyToPair else ConnectionStatus.Disconnected
+                        _connectionStatus.value =
+                            if (isAppRegistered) ConnectionStatus.ReadyToPair else ConnectionStatus.Disconnected
+                        // Reset HID host-server registration cleanly after disconnect to avoid stale sockets
+                        reregisterWithCleanState()
                     }
                     BluetoothProfile.STATE_DISCONNECTING -> Unit
                 }
@@ -229,41 +258,9 @@ class BluetoothHidController(private val context: Context) {
                 super.onGetReport(device, type, id, bufferSize)
                 val hid = hidDevice ?: return
                 if (device == null || !hasBluetoothPermissions()) return
-
-                if (type == BluetoothHidDevice.REPORT_TYPE_FEATURE) {
-                    val payload: ByteArray? = when (id) {
-                        HidConstants.REPORT_ID_TP_CAPABILITIES ->
-                            byteArrayOf(HidConstants.TP_MAX_CONTACTS.toByte())
-                        HidConstants.REPORT_ID_TP_INPUT_MODE ->
-                            byteArrayOf(tpInputMode)
-                        HidConstants.REPORT_ID_TP_SELECTIVE ->
-                            byteArrayOf(tpSelectiveReporting)
-                        HidConstants.REPORT_ID_TP_CERT ->
-                            HidConstants.PTP_CERT_BLOB
-                        else -> null
-                    }
-                    if (payload != null) {
-                        try {
-                            hid.replyReport(device, type, id, payload)
-                        } catch (e: Exception) {
-                            Log.e(tag, "Error replying feature report $id", e)
-                        }
-                    } else {
-                        hid.reportError(device, BluetoothHidDevice.ERROR_RSP_INVALID_RPT_ID)
-                    }
-                } else {
+                try {
                     hid.reportError(device, BluetoothHidDevice.ERROR_RSP_UNSUPPORTED_REQ)
-                }
-            }
-
-            @SuppressLint("MissingPermission")
-            override fun onSetReport(device: BluetoothDevice?, type: Byte, id: Byte, data: ByteArray?) {
-                super.onSetReport(device, type, id, data)
-                if (type == BluetoothHidDevice.REPORT_TYPE_FEATURE && data != null && data.isNotEmpty()) {
-                    when (id) {
-                        HidConstants.REPORT_ID_TP_INPUT_MODE -> tpInputMode = data[0]
-                        HidConstants.REPORT_ID_TP_SELECTIVE -> tpSelectiveReporting = data[0]
-                    }
+                } catch (_: Exception) {
                 }
             }
         }
@@ -273,82 +270,67 @@ class BluetoothHidController(private val context: Context) {
         }
 
         @SuppressLint("MissingPermission")
-        fun unregisterApp() {
-            val hid = hidDevice ?: return
-            if (isAppRegistered) {
-                hid.unregisterApp()
-                isAppRegistered = false
-            }
-        }
-
-        @SuppressLint("MissingPermission")
-        fun registerHidApp(usePrecisionTouchpad: Boolean) {
+        fun registerClassicComboApp(isRetryAfterCleanup: Boolean = false) {
             val hid = hidDevice ?: return
             if (isAppRegistered) return
             if (!hasBluetoothPermissions()) return
 
-            val descriptor = if (usePrecisionTouchpad) {
-                HidConstants.PRECISION_COMBO_REPORT_DESCRIPTOR
-            } else {
+            val hostName = systemHostLabel()
+            val sdp = BluetoothHidDeviceAppSdpSettings(
+                hostName,
+                "Wireless Touchpad & Keyboard",
+                hostName,
+                BluetoothHidDevice.SUBCLASS1_COMBO,
                 HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR
-            }
-
-            val subclass = if (usePrecisionTouchpad) {
-                BluetoothHidDevice.SUBCLASS2_DIGITIZER_TABLET
-            } else {
-                BluetoothHidDevice.SUBCLASS1_COMBO
-            }
+            )
 
             try {
-                val sdp = BluetoothHidDeviceAppSdpSettings(
-                    customSdpName,
-                    if (usePrecisionTouchpad) "TabRemote Touchpad & Keyboard" else "TabRemote Classic HID & Keyboard",
-                    "TabRemote",
-                    subclass,
-                    descriptor
-                )
-
-                val qos = BluetoothHidDeviceAppQosSettings(
-                    BluetoothHidDeviceAppQosSettings.SERVICE_BEST_EFFORT,
-                    800,
-                    9,
-                    0,
-                    11250,
-                    BluetoothHidDeviceAppQosSettings.MAX
-                )
-
-                val ok = hid.registerApp(sdp, null, qos, executor, hidCallback)
-                Log.d(tag, "registerApp(precision=$usePrecisionTouchpad, name=$customSdpName, subclass=$subclass) -> $ok")
-                if (!ok && usePrecisionTouchpad) {
-                    val comboPtpSdp = BluetoothHidDeviceAppSdpSettings(
-                        customSdpName,
-                        "TabRemote Touchpad & Keyboard",
-                        "TabRemote",
-                        BluetoothHidDevice.SUBCLASS1_COMBO,
-                        descriptor
-                    )
-                    val retryOk = hid.registerApp(comboPtpSdp, null, qos, executor, hidCallback)
-                    if (!retryOk) {
-                        _hidDiagnostics.value = "Precision Touchpad reddedildi; Klasik HID (+ Ctrl Zoom yedeği) profiline geçiliyor."
-                        activeUsePrecisionTouchpad = false
-                        val fallbackSdp = BluetoothHidDeviceAppSdpSettings(
-                            customSdpName,
-                            "TabRemote Classic HID Mouse & Keyboard",
-                            "TabRemote",
-                            BluetoothHidDevice.SUBCLASS1_COMBO,
-                            HidConstants.CLASSIC_COMBO_REPORT_DESCRIPTOR
-                        )
-                        val fallbackOk = hid.registerApp(fallbackSdp, null, qos, executor, hidCallback)
-                        if (!fallbackOk) {
-                            _connectionStatus.value = ConnectionStatus.Error("HID servisi kaydedilemedi. Telefonun Bluetooth'unu kapatıp açın.")
+                // Null InQos/OutQos avoids vendor SDP/L2CAP rejection on Samsung & Android hosts.
+                val ok = hid.registerApp(sdp, null, null, executor, hidCallback)
+                Log.d(tag, "registerClassicComboApp(name=$hostName, retry=$isRetryAfterCleanup) -> $ok")
+                if (!ok) {
+                    if (!isRetryAfterCleanup) {
+                        _hidDiagnostics.value = "Önceki HID oturumu temizleniyor ve yeniden kaydediliyor..."
+                        pendingReregister = true
+                        try {
+                            hid.unregisterApp()
+                        } catch (_: Exception) {
                         }
+                        scope.launch {
+                            delay(500L)
+                            if (pendingReregister && !isAppRegistered) {
+                                pendingReregister = false
+                                registerClassicComboApp(isRetryAfterCleanup = true)
+                            }
+                        }
+                    } else {
+                        _hidDiagnostics.value = "HID servisi kaydedilemedi. Bluetooth'u kapatıp açın veya hedef cihazdaki eski eşleşmeyi kaldırıp yeniden eşleştirin."
+                        _connectionStatus.value = ConnectionStatus.Error("HID servisi kaydedilemedi. Bluetooth'u kapatıp açın.")
                     }
-                } else if (!ok) {
-                    _connectionStatus.value = ConnectionStatus.Error("HID servisi bu cihazda kaydedilemedi.")
+                } else {
+                    _hidDiagnostics.value = null
                 }
             } catch (e: Exception) {
                 Log.e(tag, "Exception registering HID App", e)
-                _connectionStatus.value = ConnectionStatus.Error("Kayıt hatası: ${e.message}")
+                _connectionStatus.value = ConnectionStatus.Error("HID kayıt hatası: ${e.message}")
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        fun reregisterWithCleanState() {
+            val hid = hidDevice ?: return
+            if (!hasBluetoothPermissions()) return
+            if (pendingReregister) return
+            pendingReregister = true
+            try {
+                if (isAppRegistered) {
+                    hid.unregisterApp()
+                } else {
+                    pendingReregister = false
+                    registerClassicComboApp(isRetryAfterCleanup = true)
+                }
+            } catch (_: Exception) {
+                pendingReregister = false
             }
         }
 
@@ -371,9 +353,16 @@ class BluetoothHidController(private val context: Context) {
         fun close() {
             val hid = hidDevice ?: return
             if (isAppRegistered && hasBluetoothPermissions()) {
-                hid.unregisterApp()
+                try {
+                    hid.unregisterApp()
+                } catch (_: Exception) {
+                }
+                isAppRegistered = false
             }
-            bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid)
+            try {
+                bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid)
+            } catch (_: Exception) {
+            }
             hidDevice = null
         }
     }
@@ -389,7 +378,8 @@ class BluetoothHidController(private val context: Context) {
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(btBroadcastReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                // System Bluetooth broadcasts MUST use RECEIVER_EXPORTED on Android 13+
+                context.registerReceiver(btBroadcastReceiver, filter, Context.RECEIVER_EXPORTED)
             } else {
                 @Suppress("DEPRECATION")
                 context.registerReceiver(btBroadcastReceiver, filter)
@@ -400,13 +390,11 @@ class BluetoothHidController(private val context: Context) {
         }
     }
 
-    fun initialize(usePrecisionTouchpad: Boolean = true, sdpName: String = customSdpName) {
-        activeUsePrecisionTouchpad = usePrecisionTouchpad
-        if (sdpName.isNotBlank()) customSdpName = sdpName.trim().take(30)
+    fun initialize() {
         ensureReceiverRegistered()
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            _connectionStatus.value = ConnectionStatus.Error("Bluetooth HID profili Android 9+ gerektirir. Tablet Alıcı (Wi-Fi) modunu kullanabilirsiniz.")
+            _connectionStatus.value = ConnectionStatus.Error("Bluetooth HID profili Android 9+ gerektirir. Wi-Fi Alıcı modunu kullanabilirsiniz.")
             return
         }
 
@@ -417,7 +405,7 @@ class BluetoothHidController(private val context: Context) {
 
         val adapter = bluetoothAdapter
         if (adapter == null) {
-            _connectionStatus.value = ConnectionStatus.Error("Bu cihazda Bluetooth donanımı yok.")
+            _connectionStatus.value = ConnectionStatus.Error("Bu cihazda Bluetooth donanımı bulunmuyor.")
             return
         }
 
@@ -430,7 +418,9 @@ class BluetoothHidController(private val context: Context) {
         val currentProxy = delegate.hidDevice
         if (currentProxy != null) {
             if (!isAppRegistered) {
-                delegate.registerHidApp(usePrecisionTouchpad)
+                delegate.registerClassicComboApp()
+            } else if (_connectedDevice.value == null) {
+                _connectionStatus.value = ConnectionStatus.ReadyToPair
             }
             refreshBondedDevices()
             return
@@ -438,10 +428,11 @@ class BluetoothHidController(private val context: Context) {
 
         if (!isProxyRequested) {
             try {
+                _connectionStatus.value = ConnectionStatus.Initializing
                 val supported = delegate.requestProxy(adapter)
                 isProxyRequested = supported
                 if (!supported) {
-                    _connectionStatus.value = ConnectionStatus.Error("Bluetooth HID profili bu ROM/cihazda desteklenmiyor. Tablet Alıcı Modu'nu kullanabilirsiniz.")
+                    _connectionStatus.value = ConnectionStatus.Error("Bluetooth HID profili bu ROM/cihazda desteklenmiyor. Wi-Fi Alıcı Modu'nu kullanabilirsiniz.")
                 }
             } catch (e: Exception) {
                 Log.e(tag, "Error requesting HID_DEVICE profile proxy", e)
@@ -451,57 +442,10 @@ class BluetoothHidController(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun reregisterProfile(usePrecisionTouchpad: Boolean, newSdpName: String? = null) {
-        activeUsePrecisionTouchpad = usePrecisionTouchpad
-        if (!newSdpName.isNullOrBlank()) {
-            customSdpName = newSdpName.trim().take(30)
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val delegate = requireApi28Delegate()
-        if (delegate?.hidDevice == null) {
-            initialize(usePrecisionTouchpad, customSdpName)
-            return
-        }
-        if (!hasBluetoothPermissions()) return
-        val previousDevice = _connectedDevice.value
-
-        scope.launch {
-            try {
-                if (isAppRegistered) {
-                    delegate.unregisterApp()
-                    delay(250)
-                }
-                delegate.registerHidApp(usePrecisionTouchpad)
-                if (previousDevice != null) {
-                    delay(400)
-                    connectToDevice(previousDevice)
-                }
-            } catch (e: Exception) {
-                Log.e(tag, "Error re-registering HID profile", e)
-            }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    fun renameBluetoothDevice(newName: String): Boolean {
-        val clean = newName.trim().take(30)
-        if (clean.isBlank()) return false
-        customSdpName = clean
-        val adapterRenamed = try {
-            if (hasBluetoothPermissions() && bluetoothAdapter != null) {
-                bluetoothAdapter.setName(clean)
-            } else false
-        } catch (_: Exception) {
-            false
-        }
-        reregisterProfile(activeUsePrecisionTouchpad, clean)
-        return adapterRenamed
-    }
-
-    @SuppressLint("MissingPermission")
     fun startDeviceScan() {
+        ensureReceiverRegistered()
         if (!hasScanPermission()) {
-            _hidDiagnostics.value = "Cihaz taraması için BLUETOOTH_SCAN izni gerekli."
+            _hidDiagnostics.value = "Cihaz taraması için Yakındaki Cihazlar ve Konum izni gerekli."
             return
         }
         val adapter = bluetoothAdapter ?: return
@@ -514,14 +458,26 @@ class BluetoothHidController(private val context: Context) {
                 adapter.cancelDiscovery()
             }
             _discoveredDevices.value = emptyList()
+            _hidDiagnostics.value = null
             val started = adapter.startDiscovery()
             _isScanning.value = started
             if (!started) {
-                _hidDiagnostics.value = "Bluetooth taraması başlatılamadı."
+                _hidDiagnostics.value = "Bluetooth taraması başlatılamadı. Konum servisinin açık olduğundan emin olun."
+            } else {
+                scope.launch {
+                    delay(12_500L)
+                    if (_isScanning.value) {
+                        stopDeviceScan()
+                        if (_discoveredDevices.value.isEmpty()) {
+                            _hidDiagnostics.value = "Yeni cihaz görünmedi. Hedef tabletin Bluetooth ayar ekranını açık tutup 'Görünür Ol' veya tekrar taramayı deneyin."
+                        }
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "startDiscovery failed", e)
             _isScanning.value = false
+            _hidDiagnostics.value = "Tarama hatası: ${e.localizedMessage ?: "Bilinmeyen hata"}"
         }
     }
 
@@ -531,7 +487,8 @@ class BluetoothHidController(private val context: Context) {
         try {
             bluetoothAdapter?.cancelDiscovery()
             _isScanning.value = false
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     fun createDiscoverableIntent(durationSeconds: Int = 120): Intent {
@@ -565,8 +522,8 @@ class BluetoothHidController(private val context: Context) {
         stopDeviceScan()
         val delegate = hidApi28
         if (delegate?.hidDevice == null || !isAppRegistered) {
-            initialize(activeUsePrecisionTouchpad, customSdpName)
-            _connectionStatus.value = ConnectionStatus.Error("HID hazır değil, tekrar deneniyor...")
+            initialize()
+            _connectionStatus.value = ConnectionStatus.Error("HID servisi hazırlanıyor, lütfen birkaç saniye sonra tekrar dokunun.")
             return
         }
         try {
@@ -574,12 +531,34 @@ class BluetoothHidController(private val context: Context) {
             val initiated = delegate.connect(device)
             if (!initiated) {
                 _connectionStatus.value = ConnectionStatus.Error(
-                    "${getDeviceName(device)} bağlantıyı kabul etmedi. Önce tabletten telefonun adını seçerek bağlamayı deneyin."
+                    "${getDeviceName(device)} bağlantıyı kabul etmedi. Tabletin Bluetooth ayarlarında 'Giriş Aygıtı' iznini açın veya eşleşmeyi kaldırıp yeniden eşleştirin."
                 )
             }
         } catch (e: Exception) {
             Log.e(tag, "Failed to connect to device", e)
             _connectionStatus.value = ConnectionStatus.Error("Bağlantı hatası: ${e.message}")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun unpairDevice(device: BluetoothDevice): Boolean {
+        if (!hasBluetoothPermissions()) return false
+        try {
+            if (_connectedDevice.value?.address == device.address) {
+                disconnectDevice()
+            }
+            val method = device.javaClass.getMethod("removeBond")
+            val result = method.invoke(device) as? Boolean ?: true
+            scope.launch {
+                delay(350)
+                refreshBondedDevices()
+                _discoveredDevices.value = _discoveredDevices.value.filterNot { it.address == device.address }
+            }
+            return result
+        } catch (e: Exception) {
+            Log.w(tag, "removeBond failed", e)
+            _hidDiagnostics.value = "Eşleşme kaldırılamadı; sistem Bluetooth ayarlarından unutmayı deneyin."
+            return false
         }
     }
 
@@ -611,26 +590,32 @@ class BluetoothHidController(private val context: Context) {
 
     fun hasBluetoothPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) ==
+                PackageManager.PERMISSION_GRANTED
         } else {
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH) ==
+                PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_ADMIN) ==
+                PackageManager.PERMISSION_GRANTED
         }
     }
 
     fun hasScanPermission(): Boolean {
+        val hasFine = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_SCAN) ==
+                PackageManager.PERMISSION_GRANTED && (hasFine || hasCoarse || true)
         } else {
-            ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                hasBluetoothPermissions()
+            (hasFine || hasCoarse) && hasBluetoothPermissions()
         }
     }
 
     @SuppressLint("MissingPermission")
     fun getDeviceName(device: BluetoothDevice?): String {
-        if (device == null) return "Unknown"
+        if (device == null) return "Bilinmeyen Cihaz"
         return if (hasBluetoothPermissions()) {
             device.name ?: device.address ?: "Tablet / Ekran"
         } else {
@@ -638,8 +623,25 @@ class BluetoothHidController(private val context: Context) {
         }
     }
 
+    @SuppressLint("MissingPermission")
+    fun deviceTypeLabel(device: BluetoothDevice): String {
+        if (!hasBluetoothPermissions()) return "Bluetooth Cihazı"
+        val major = try {
+            device.bluetoothClass?.majorDeviceClass
+        } catch (_: Exception) {
+            null
+        }
+        return when (major) {
+            android.bluetooth.BluetoothClass.Device.Major.COMPUTER -> "Bilgisayar / Tablet"
+            android.bluetooth.BluetoothClass.Device.Major.PHONE -> "Telefon / Tablet"
+            android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO -> "Akıllı TV / Medya"
+            android.bluetooth.BluetoothClass.Device.Major.PERIPHERAL -> "Çevre Birimi"
+            else -> "Bluetooth Ana Cihaz"
+        }
+    }
+
     // ==========================================
-    // 5-Button Mouse + Wheel + AC Pan
+    // 5-Button Mouse + Wheel + AC Pan (Report ID 1)
     // ==========================================
 
     @SuppressLint("MissingPermission")
@@ -662,13 +664,11 @@ class BluetoothHidController(private val context: Context) {
         }
     }
 
-    @SuppressLint("MissingPermission")
     fun sendMouseButtonDown(button: MouseButton) {
         currentButtonsMask = currentButtonsMask or button.mask
         sendMouseDelta(0, 0, 0, 0)
     }
 
-    @SuppressLint("MissingPermission")
     fun sendMouseButtonUp(button: MouseButton) {
         currentButtonsMask = currentButtonsMask and button.mask.inv()
         sendMouseDelta(0, 0, 0, 0)
@@ -691,7 +691,7 @@ class BluetoothHidController(private val context: Context) {
     }
 
     /**
-     * Classic fallback pinch-to-zoom: holds Left Ctrl while sending mouse wheel ticks
+     * Pinch-to-zoom using Classic Combo HID: holds Left Ctrl while sending mouse wheel ticks
      * so browsers/editors/viewports treat touchpad pinch gestures as Ctrl + Scroll zoom.
      */
     fun sendCtrlScrollZoomStep(wheelTicks: Int) {
@@ -704,42 +704,9 @@ class BluetoothHidController(private val context: Context) {
         sendKeyboardState(0, emptyList())
     }
 
-    @SuppressLint("MissingPermission")
-    fun sendTouchpadContacts(contacts: List<TouchContact>, clickpadPressed: Boolean = false) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val dev = _connectedDevice.value ?: return
-        if (!hasBluetoothPermissions()) return
-
-        val payload = ByteArray(24)
-        val clampedCount = contacts.size.coerceAtMost(HidConstants.TP_MAX_CONTACTS)
-
-        for (i in 0 until HidConstants.TP_MAX_CONTACTS) {
-            val base = i * 5
-            if (i < clampedCount) {
-                val c = contacts[i]
-                val flags = (if (c.tipDown) 0x01 else 0x00) or 0x02 or ((c.contactId and 0x0F) shl 2)
-                val x = c.x.coerceIn(0, HidConstants.TP_LOGICAL_MAX_X)
-                val y = c.y.coerceIn(0, HidConstants.TP_LOGICAL_MAX_Y)
-                payload[base] = flags.toByte()
-                payload[base + 1] = (x and 0xFF).toByte()
-                payload[base + 2] = ((x shr 8) and 0xFF).toByte()
-                payload[base + 3] = (y and 0xFF).toByte()
-                payload[base + 4] = ((y shr 8) and 0xFF).toByte()
-            }
-        }
-
-        val scanTime = ((System.nanoTime() / 100_000L) and 0xFFFFL).toInt()
-        payload[20] = (scanTime and 0xFF).toByte()
-        payload[21] = ((scanTime shr 8) and 0xFF).toByte()
-        payload[22] = clampedCount.toByte()
-        payload[23] = if (clickpadPressed) 1.toByte() else 0.toByte()
-
-        try {
-            hidApi28?.sendReport(dev, HidConstants.REPORT_ID_TOUCHPAD.toInt(), payload)
-        } catch (e: Exception) {
-            Log.e(tag, "Error sending Precision Touchpad report", e)
-        }
-    }
+    // ==========================================
+    // Hardware Keyboard (Report ID 2)
+    // ==========================================
 
     @SuppressLint("MissingPermission")
     fun sendKeyboardKey(hidKeyCode: Int, modifier: Int = 0) {
@@ -793,6 +760,10 @@ class BluetoothHidController(private val context: Context) {
         }
     }
 
+    // ==========================================
+    // Consumer Control (Report ID 3)
+    // ==========================================
+
     @SuppressLint("MissingPermission")
     fun sendConsumerKey(usageCode: Int) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
@@ -811,34 +782,6 @@ class BluetoothHidController(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(tag, "Error sending consumer report", e)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    fun sendGamepadReport(
-        buttonsMask: Int,
-        hat: Int,
-        lx: Int,
-        ly: Int,
-        rx: Int,
-        ry: Int
-    ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        val dev = _connectedDevice.value ?: return
-        if (!hasBluetoothPermissions()) return
-        val reportData = byteArrayOf(
-            (buttonsMask and 0xFF).toByte(),
-            ((buttonsMask shr 8) and 0xFF).toByte(),
-            (hat and 0x0F).toByte(),
-            lx.coerceIn(-127, 127).toByte(),
-            ly.coerceIn(-127, 127).toByte(),
-            rx.coerceIn(-127, 127).toByte(),
-            ry.coerceIn(-127, 127).toByte()
-        )
-        try {
-            hidApi28?.sendReport(dev, HidConstants.REPORT_ID_GAMEPAD.toInt(), reportData)
-        } catch (e: Exception) {
-            Log.e(tag, "Error sending gamepad report", e)
         }
     }
 

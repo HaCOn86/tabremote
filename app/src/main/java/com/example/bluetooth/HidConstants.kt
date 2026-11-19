@@ -2,67 +2,18 @@ package com.example.bluetooth
 
 /**
  * Standard HID Report Descriptors and Key Codes for USB / Bluetooth HID.
- * Includes:
- * - Precision Touchpad (Digitizer 0x0D / Touch Pad 0x05, 4 parallel fingers, Zoom/Scroll/3-Finger Gestures)
- * - 5-Button Mouse (Left, Right, Middle, M4/Back, M5/Forward) + Vertical Wheel + Horizontal AC Pan
- * - Full Hardware Keyboard (ANSI/ISO Turkish Q & US QWERTY, F1-F12, Numpad, Media Modifiers)
- * - Consumer Control (Media, Back, Home, AL Task Manager)
- * - Gamepad / Console Controller (16 Buttons, 8-Way Hat D-Pad, Dual Analog Sticks)
+ * Streamlined Mouse + Keyboard + Consumer Control profile (98 bytes, maximally compatible
+ * across Samsung, Android, Windows, macOS, Linux hosts without tethering misdetection):
+ * - Report ID 1: 5-Button Mouse (Left, Right, Middle, M4/Back, M5/Forward) + Wheel + Horizontal AC Pan
+ * - Report ID 2: Full Hardware Keyboard (ANSI/ISO Turkish Q & US QWERTY, F1-F12, Numpad, Ctrl+Scroll Zoom)
+ * - Report ID 3: Consumer Control (Media, Back, Home, AL Task Manager)
  */
 object HidConstants {
     const val REPORT_ID_MOUSE: Byte = 1
     const val REPORT_ID_KEYBOARD: Byte = 2
     const val REPORT_ID_CONSUMER: Byte = 3
-    const val REPORT_ID_TOUCHPAD: Byte = 4
-    const val REPORT_ID_TP_CAPABILITIES: Byte = 5
-    const val REPORT_ID_TP_INPUT_MODE: Byte = 6
-    const val REPORT_ID_TP_SELECTIVE: Byte = 7
-    const val REPORT_ID_TP_CERT: Byte = 8
-    const val REPORT_ID_GAMEPAD: Byte = 9
 
-    const val TP_LOGICAL_MAX_X = 3200
-    const val TP_LOGICAL_MAX_Y = 2000
-    const val TP_MAX_CONTACTS = 4
-
-    private fun fingerCollectionBytes(): ByteArray = byteArrayOf(
-        0x05.toByte(), 0x0D.toByte(),        //   USAGE_PAGE (Digitizers)
-        0x09.toByte(), 0x22.toByte(),        //   USAGE (Finger)
-        0xA1.toByte(), 0x02.toByte(),        //   COLLECTION (Logical)
-        // Tip Switch (1 bit) + Confidence (1 bit) + Contact Identifier (6 bits) = 1 byte
-        0x09.toByte(), 0x42.toByte(),        //     USAGE (Tip Switch)
-        0x09.toByte(), 0x47.toByte(),        //     USAGE (Confidence)
-        0x15.toByte(), 0x00.toByte(),        //     LOGICAL_MINIMUM (0)
-        0x25.toByte(), 0x01.toByte(),        //     LOGICAL_MAXIMUM (1)
-        0x75.toByte(), 0x01.toByte(),        //     REPORT_SIZE (1)
-        0x95.toByte(), 0x02.toByte(),        //     REPORT_COUNT (2)
-        0x81.toByte(), 0x02.toByte(),        //     INPUT (Data,Var,Abs)
-        0x09.toByte(), 0x51.toByte(),        //     USAGE (Contact Identifier)
-        0x75.toByte(), 0x06.toByte(),        //     REPORT_SIZE (6)
-        0x95.toByte(), 0x01.toByte(),        //     REPORT_COUNT (1)
-        0x25.toByte(), 0x0F.toByte(),        //     LOGICAL_MAXIMUM (15)
-        0x81.toByte(), 0x02.toByte(),        //     INPUT (Data,Var,Abs)
-        // X & Y Coordinates (16-bit unsigned each, with physical size 100mm x 62.5mm)
-        0xA4.toByte(),                       //     PUSH
-        0x05.toByte(), 0x01.toByte(),        //     USAGE_PAGE (Generic Desktop)
-        0x15.toByte(), 0x00.toByte(),        //     LOGICAL_MINIMUM (0)
-        0x26.toByte(), 0x80.toByte(), 0x0C.toByte(), // LOGICAL_MAXIMUM (3200)
-        0x35.toByte(), 0x00.toByte(),        //     PHYSICAL_MINIMUM (0)
-        0x46.toByte(), 0xE8.toByte(), 0x03.toByte(), // PHYSICAL_MAXIMUM (1000 -> 10.00cm)
-        0x55.toByte(), 0x0E.toByte(),        //     UNIT_EXPONENT (-2)
-        0x65.toByte(), 0x11.toByte(),        //     UNIT (SI Lin:Distance - cm)
-        0x75.toByte(), 0x10.toByte(),        //     REPORT_SIZE (16)
-        0x95.toByte(), 0x01.toByte(),        //     REPORT_COUNT (1)
-        0x09.toByte(), 0x30.toByte(),        //     USAGE (X)
-        0x81.toByte(), 0x02.toByte(),        //     INPUT (Data,Var,Abs)
-        0x26.toByte(), 0xD0.toByte(), 0x07.toByte(), // LOGICAL_MAXIMUM (2000)
-        0x46.toByte(), 0x71.toByte(), 0x02.toByte(), // PHYSICAL_MAXIMUM (625 -> 6.25cm)
-        0x09.toByte(), 0x31.toByte(),        //     USAGE (Y)
-        0x81.toByte(), 0x02.toByte(),        //     INPUT (Data,Var,Abs)
-        0xB4.toByte(),                       //     POP
-        0xC0.toByte()                        //   END_COLLECTION (Logical Finger)
-    )
-
-    private val MOUSE_KEYBOARD_CONSUMER_GAMEPAD_DESCRIPTOR = byteArrayOf(
+    val CLASSIC_COMBO_REPORT_DESCRIPTOR: ByteArray = byteArrayOf(
         // === 1. 5-BUTTON MOUSE + WHEEL + HORIZONTAL AC PAN (Report ID 1) ===
         0x05.toByte(), 0x01.toByte(),        // USAGE_PAGE (Generic Desktop)
         0x09.toByte(), 0x02.toByte(),        // USAGE (Mouse)
@@ -118,7 +69,7 @@ object HidConstants {
         // Reserved byte
         0x95.toByte(), 0x01.toByte(),        //   REPORT_COUNT (1)
         0x75.toByte(), 0x08.toByte(),        //   REPORT_SIZE (8)
-        0x81.toByte(), 0x01.toByte(),        //   INPUT (Cnst,Ary,Abs)
+        0x81.toByte(), 0x03.toByte(),        //   INPUT (Cnst,Var,Abs)
         // 6-key rollover array (up to 0x73 / 115)
         0x95.toByte(), 0x06.toByte(),        //   REPORT_COUNT (6)
         0x75.toByte(), 0x08.toByte(),        //   REPORT_SIZE (8)
@@ -142,158 +93,8 @@ object HidConstants {
         0x75.toByte(), 0x10.toByte(),        //   REPORT_SIZE (16)
         0x95.toByte(), 0x01.toByte(),        //   REPORT_COUNT (1)
         0x81.toByte(), 0x00.toByte(),        //   INPUT (Data,Ary,Abs)
-        0xC0.toByte(),                       // END_COLLECTION (Consumer Control)
-
-        // === 4. GAMEPAD / CONSOLE CONTROLLER (Report ID 9) ===
-        0x05.toByte(), 0x01.toByte(),        // USAGE_PAGE (Generic Desktop)
-        0x09.toByte(), 0x05.toByte(),        // USAGE (Game Pad)
-        0xA1.toByte(), 0x01.toByte(),        // COLLECTION (Application)
-        0x85.toByte(), REPORT_ID_GAMEPAD,    //   REPORT_ID (9)
-        0xA1.toByte(), 0x00.toByte(),        //   COLLECTION (Physical)
-        // 16 Buttons (A, B, X, Y, L1, R1, L2, R2, Select, Start, Mode, L3, R3, etc.) -> 2 bytes
-        0x05.toByte(), 0x09.toByte(),        //     USAGE_PAGE (Button)
-        0x19.toByte(), 0x01.toByte(),        //     USAGE_MINIMUM (Button 1)
-        0x29.toByte(), 0x10.toByte(),        //     USAGE_MAXIMUM (Button 16)
-        0x15.toByte(), 0x00.toByte(),        //     LOGICAL_MINIMUM (0)
-        0x25.toByte(), 0x01.toByte(),        //     LOGICAL_MAXIMUM (1)
-        0x75.toByte(), 0x01.toByte(),        //     REPORT_SIZE (1)
-        0x95.toByte(), 0x10.toByte(),        //     REPORT_COUNT (16)
-        0x81.toByte(), 0x02.toByte(),        //     INPUT (Data,Var,Abs)
-        // Hat Switch (8-way D-Pad, 4 bits) + 4 bits padding -> 1 byte
-        0x05.toByte(), 0x01.toByte(),        //     USAGE_PAGE (Generic Desktop)
-        0x09.toByte(), 0x39.toByte(),        //     USAGE (Hat Switch)
-        0x15.toByte(), 0x00.toByte(),        //     LOGICAL_MINIMUM (0)
-        0x25.toByte(), 0x07.toByte(),        //     LOGICAL_MAXIMUM (7)
-        0x35.toByte(), 0x00.toByte(),        //     PHYSICAL_MINIMUM (0)
-        0x46.toByte(), 0x3B.toByte(), 0x01.toByte(), // PHYSICAL_MAXIMUM (315)
-        0x65.toByte(), 0x14.toByte(),        //     UNIT (Eng Rot:Angular Pos)
-        0x75.toByte(), 0x04.toByte(),        //     REPORT_SIZE (4)
-        0x95.toByte(), 0x01.toByte(),        //     REPORT_COUNT (1)
-        0x81.toByte(), 0x42.toByte(),        //     INPUT (Data,Var,Abs,Null)
-        0x65.toByte(), 0x00.toByte(),        //     UNIT (None)
-        0x75.toByte(), 0x04.toByte(),        //     REPORT_SIZE (4)
-        0x95.toByte(), 0x01.toByte(),        //     REPORT_COUNT (1)
-        0x81.toByte(), 0x03.toByte(),        //     INPUT (Cnst,Var,Abs)
-        // Analog Axes: Left (X, Y) + Right (Z, Rz) -> 4 bytes (-127..127)
-        0x09.toByte(), 0x30.toByte(),        //     USAGE (X)
-        0x09.toByte(), 0x31.toByte(),        //     USAGE (Y)
-        0x09.toByte(), 0x32.toByte(),        //     USAGE (Z)
-        0x09.toByte(), 0x35.toByte(),        //     USAGE (Rz)
-        0x15.toByte(), 0x81.toByte(),        //     LOGICAL_MINIMUM (-127)
-        0x25.toByte(), 0x7F.toByte(),        //     LOGICAL_MAXIMUM (127)
-        0x75.toByte(), 0x08.toByte(),        //     REPORT_SIZE (8)
-        0x95.toByte(), 0x04.toByte(),        //     REPORT_COUNT (4)
-        0x81.toByte(), 0x02.toByte(),        //     INPUT (Data,Var,Abs)
-        0xC0.toByte(),                       //   END_COLLECTION (Physical)
-        0xC0.toByte()                        // END_COLLECTION (Game Pad)
+        0xC0.toByte()                        // END_COLLECTION (Consumer Control)
     )
-
-    private val PRECISION_TOUCHPAD_COLLECTION = byteArrayOf(
-        // === PRECISION TOUCHPAD (Report ID 4 Input, IDs 5..8 Features) ===
-        0x05.toByte(), 0x0D.toByte(),        // USAGE_PAGE (Digitizers)
-        0x09.toByte(), 0x05.toByte(),        // USAGE (Touch Pad)
-        0xA1.toByte(), 0x01.toByte(),        // COLLECTION (Application)
-        0x85.toByte(), REPORT_ID_TOUCHPAD    //   REPORT_ID (4)
-    ) +
-        fingerCollectionBytes() +            // Finger 0
-        fingerCollectionBytes() +            // Finger 1
-        fingerCollectionBytes() +            // Finger 2
-        fingerCollectionBytes() +            // Finger 3
-        byteArrayOf(
-            // Scan Time (16-bit 100us increments) -> 2 bytes
-            0x05.toByte(), 0x0D.toByte(),    //   USAGE_PAGE (Digitizers)
-            0x55.toByte(), 0x0C.toByte(),    //   UNIT_EXPONENT (-4)
-            0x66.toByte(), 0x01.toByte(), 0x10.toByte(), // UNIT (SI Lin:Time - Seconds)
-            0x47.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0x00.toByte(), 0x00.toByte(), // PHYSICAL_MAX (65535)
-            0x27.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0x00.toByte(), 0x00.toByte(), // LOGICAL_MAX (65535)
-            0x75.toByte(), 0x10.toByte(),    //   REPORT_SIZE (16)
-            0x95.toByte(), 0x01.toByte(),    //   REPORT_COUNT (1)
-            0x09.toByte(), 0x56.toByte(),    //   USAGE (Scan Time)
-            0x81.toByte(), 0x02.toByte(),    //   INPUT (Data,Var,Abs)
-            // Contact Count (1 byte)
-            0x55.toByte(), 0x00.toByte(),    //   UNIT_EXPONENT (0)
-            0x65.toByte(), 0x00.toByte(),    //   UNIT (None)
-            0x35.toByte(), 0x00.toByte(),    //   PHYSICAL_MINIMUM (0)
-            0x45.toByte(), 0x00.toByte(),    //   PHYSICAL_MAXIMUM (0)
-            0x15.toByte(), 0x00.toByte(),    //   LOGICAL_MINIMUM (0)
-            0x25.toByte(), 0x04.toByte(),    //   LOGICAL_MAXIMUM (4)
-            0x75.toByte(), 0x08.toByte(),    //   REPORT_SIZE (8)
-            0x95.toByte(), 0x01.toByte(),    //   REPORT_COUNT (1)
-            0x09.toByte(), 0x54.toByte(),    //   USAGE (Contact Count)
-            0x81.toByte(), 0x02.toByte(),    //   INPUT (Data,Var,Abs)
-            // Clickpad Button (1 bit) + Padding (7 bits) -> 1 byte
-            0x05.toByte(), 0x09.toByte(),    //   USAGE_PAGE (Button)
-            0x09.toByte(), 0x01.toByte(),    //   USAGE (Button 1)
-            0x15.toByte(), 0x00.toByte(),    //   LOGICAL_MINIMUM (0)
-            0x25.toByte(), 0x01.toByte(),    //   LOGICAL_MAXIMUM (1)
-            0x75.toByte(), 0x01.toByte(),    //   REPORT_SIZE (1)
-            0x95.toByte(), 0x01.toByte(),    //   REPORT_COUNT (1)
-            0x81.toByte(), 0x02.toByte(),    //   INPUT (Data,Var,Abs)
-            0x75.toByte(), 0x07.toByte(),    //   REPORT_SIZE (7)
-            0x95.toByte(), 0x01.toByte(),    //   REPORT_COUNT (1)
-            0x81.toByte(), 0x03.toByte(),    //   INPUT (Cnst,Var,Abs)
-
-            // Feature Report ID 5: Capabilities (Max Contacts + Button Type)
-            0x05.toByte(), 0x0D.toByte(),    //   USAGE_PAGE (Digitizers)
-            0x85.toByte(), REPORT_ID_TP_CAPABILITIES, // REPORT_ID (5)
-            0x09.toByte(), 0x55.toByte(),    //   USAGE (Contact Count Maximum)
-            0x15.toByte(), 0x00.toByte(),    //   LOGICAL_MINIMUM (0)
-            0x25.toByte(), 0x04.toByte(),    //   LOGICAL_MAXIMUM (4)
-            0x75.toByte(), 0x04.toByte(),    //   REPORT_SIZE (4)
-            0x95.toByte(), 0x01.toByte(),    //   REPORT_COUNT (1)
-            0xB1.toByte(), 0x02.toByte(),    //   FEATURE (Data,Var,Abs)
-            0x09.toByte(), 0x59.toByte(),    //   USAGE (Button Type)
-            0x15.toByte(), 0x00.toByte(),    //   LOGICAL_MINIMUM (0)
-            0x25.toByte(), 0x01.toByte(),    //   LOGICAL_MAXIMUM (1)
-            0x75.toByte(), 0x04.toByte(),    //   REPORT_SIZE (4)
-            0x95.toByte(), 0x01.toByte(),    //   REPORT_COUNT (1)
-            0xB1.toByte(), 0x02.toByte(),    //   FEATURE (Data,Var,Abs)
-
-            // Feature Report ID 6: Input Mode (Mouse=0, Windows PTP=3)
-            0x09.toByte(), 0x0E.toByte(),    //   USAGE (Device Configuration)
-            0xA1.toByte(), 0x02.toByte(),    //   COLLECTION (Logical)
-            0x85.toByte(), REPORT_ID_TP_INPUT_MODE, // REPORT_ID (6)
-            0x09.toByte(), 0x52.toByte(),    //     USAGE (Device Mode)
-            0x15.toByte(), 0x00.toByte(),    //     LOGICAL_MINIMUM (0)
-            0x25.toByte(), 0x03.toByte(),    //     LOGICAL_MAXIMUM (3)
-            0x75.toByte(), 0x08.toByte(),    //     REPORT_SIZE (8)
-            0x95.toByte(), 0x01.toByte(),    //     REPORT_COUNT (1)
-            0xB1.toByte(), 0x02.toByte(),    //     FEATURE (Data,Var,Abs)
-            0xC0.toByte(),                   //   END_COLLECTION (Device Configuration)
-
-            // Feature Report ID 7: Selective Reporting (Surface Switch, Button Switch)
-            0x85.toByte(), REPORT_ID_TP_SELECTIVE, // REPORT_ID (7)
-            0x09.toByte(), 0x57.toByte(),    //   USAGE (Surface Switch)
-            0x09.toByte(), 0x58.toByte(),    //   USAGE (Button Switch)
-            0x15.toByte(), 0x00.toByte(),    //   LOGICAL_MINIMUM (0)
-            0x25.toByte(), 0x01.toByte(),    //   LOGICAL_MAXIMUM (1)
-            0x75.toByte(), 0x01.toByte(),    //   REPORT_SIZE (1)
-            0x95.toByte(), 0x02.toByte(),    //   REPORT_COUNT (2)
-            0xB1.toByte(), 0x02.toByte(),    //   FEATURE (Data,Var,Abs)
-            0x75.toByte(), 0x06.toByte(),    //   REPORT_SIZE (6)
-            0x95.toByte(), 0x01.toByte(),    //   REPORT_COUNT (1)
-            0xB1.toByte(), 0x03.toByte(),    //   FEATURE (Cnst,Var,Abs)
-
-            // Feature Report ID 8: PTPHQA Vendor Certification Blob (256 bytes)
-            0x06.toByte(), 0x00.toByte(), 0xFF.toByte(), // USAGE_PAGE (Vendor Defined 0xFF00)
-            0x09.toByte(), 0xC5.toByte(),    //   USAGE (Vendor Usage 0xC5 - PTPHQA)
-            0x85.toByte(), REPORT_ID_TP_CERT,//   REPORT_ID (8)
-            0x15.toByte(), 0x00.toByte(),    //   LOGICAL_MINIMUM (0)
-            0x26.toByte(), 0xFF.toByte(), 0x00.toByte(), // LOGICAL_MAXIMUM (255)
-            0x75.toByte(), 0x08.toByte(),    //   REPORT_SIZE (8)
-            0x96.toByte(), 0x00.toByte(), 0x01.toByte(), // REPORT_COUNT (256)
-            0xB1.toByte(), 0x02.toByte(),    //   FEATURE (Data,Var,Abs)
-
-            0xC0.toByte()                    // END_COLLECTION (Touch Pad)
-        )
-
-    /** Precision Touchpad first so host OS identifies Touchpad + Mouse + Keyboard + Consumer + Gamepad */
-    val PRECISION_COMBO_REPORT_DESCRIPTOR: ByteArray =
-        PRECISION_TOUCHPAD_COLLECTION + MOUSE_KEYBOARD_CONSUMER_GAMEPAD_DESCRIPTOR
-
-    /** Classic 5-Button Mouse + Keyboard + Consumer + Gamepad (No PTP digitizer collection) */
-    val CLASSIC_COMBO_REPORT_DESCRIPTOR: ByteArray =
-        MOUSE_KEYBOARD_CONSUMER_GAMEPAD_DESCRIPTOR
 
     /**
      * Natural two-finger vertical scroll conversion:
@@ -306,21 +107,6 @@ object HidConstants {
         pinchDelta > 0f -> 1
         pinchDelta < 0f -> -1
         else -> 0
-    }
-
-    // Standard Windows Precision Touchpad Certification Blob (256 bytes)
-    val PTP_CERT_BLOB: ByteArray = ByteArray(256).also { arr ->
-        val header = byteArrayOf(
-            0xFC.toByte(), 0x28.toByte(), 0xFE.toByte(), 0x84.toByte(),
-            0x40.toByte(), 0xCB.toByte(), 0x9A.toByte(), 0x87.toByte(),
-            0x0D.toByte(), 0xBE.toByte(), 0x57.toByte(), 0x3C.toByte(),
-            0xB6.toByte(), 0x70.toByte(), 0x09.toByte(), 0x88.toByte(),
-            0x07.toByte(), 0x97.toByte(), 0x2D.toByte(), 0x2B.toByte(),
-            0xE3.toByte(), 0x38.toByte(), 0x34.toByte(), 0xB6.toByte(),
-            0x6C.toByte(), 0xED.toByte(), 0xB0.toByte(), 0xF7.toByte(),
-            0xE5.toByte(), 0x9C.toByte(), 0xF6.toByte(), 0xC2.toByte()
-        )
-        header.copyInto(arr, 0)
     }
 
     // Keyboard Modifier bitmasks
@@ -435,10 +221,27 @@ object HidConstants {
     const val KEY_KP_DOT = 0x63
     const val KEY_NON_US_BACKSLASH = 0x64 // ISO '< > |' next to Left Shift
 
+    const val KEY_MENU = 0x65
+    const val KEY_POWER = 0x66
+
     // Consumer Control Usages (16-bit)
+    const val CONSUMER_POWER = 0x0030
+    const val CONSUMER_MENU = 0x0040
+    const val CONSUMER_MENU_PICK = 0x0041
+    const val CONSUMER_MENU_UP = 0x0042
+    const val CONSUMER_MENU_DOWN = 0x0043
+    const val CONSUMER_MENU_LEFT = 0x0044
+    const val CONSUMER_MENU_RIGHT = 0x0045
+    const val CONSUMER_MEDIA_SELECT_TV = 0x0089
+    const val CONSUMER_MEDIA_SELECT_GUIDE = 0x008D
+    const val CONSUMER_CH_UP = 0x009C
+    const val CONSUMER_CH_DOWN = 0x009D
+    const val CONSUMER_FAST_FORWARD = 0x00B3
+    const val CONSUMER_REWIND = 0x00B4
     const val CONSUMER_PLAY_PAUSE = 0x00CD
     const val CONSUMER_NEXT_TRACK = 0x00B5
     const val CONSUMER_PREV_TRACK = 0x00B6
+    const val CONSUMER_STOP = 0x00B7
     const val CONSUMER_VOLUME_UP = 0x00E9
     const val CONSUMER_VOLUME_DOWN = 0x00EA
     const val CONSUMER_MUTE = 0x00E2
